@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 貨櫃裝載模型 (多貨物類型)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #f0f0f0;
+            overflow: hidden;
+        }
+        #mainContainer {
+            display: flex;
+            flex-direction: row;
+            width: 100%;
+            flex-grow: 1;
+            overflow: hidden;
+        }
+        #inputControlsContainer {
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+            overflow-y: auto;
+            width: 350px; /* Increased width for more inputs */
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        #inputControlsContainer h2, #inputControlsContainer h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+            color: #333;
+        }
+        .input-group {
+            margin-bottom: 8px;
+            display: flex;
+            flex-direction: column;
+        }
+        .input-group label {
+            margin-bottom: 3px;
+            font-weight: bold;
+            font-size: 0.85em;
+        }
+        .input-group input[type="text"],
+        .input-group input[type="number"],
+        .input-group input[type="color"] {
+            width: calc(100% - 12px);
+            padding: 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .input-group input[type="color"] {
+            height: 30px;
+            padding: 2px; /* Adjust padding for color input */
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .checkbox-group label {
+            margin-left: 5px;
+            font-weight: normal;
+            font-size: 0.9em;
+        }
+        #cargoItemsList {
+            margin-top: 10px;
+            border-top: 1px solid #ccc;
+            padding-top: 10px;
+        }
+        .cargo-item-display {
+            background-color: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 8px;
+            font-size: 0.8em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .cargo-item-details span { display: block; }
+        .cargo-item-color-swatch {
+            width: 20px;
+            height: 20px;
+            border: 1px solid #888;
+            margin-right: 8px;
+            border-radius: 3px;
+        }
+        .cargo-item-actions button {
+            padding: 3px 6px;
+            font-size: 0.8em;
+            background-color: #dc3545;
+        }
+        #simulationControls {
+            padding: 10px 20px;
+            background-color: #fff;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+        }
+        button {
+            padding: 8px 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background-color 0.2s ease;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        #stats { font-size: 0.9em; color: #333; margin-left: 10px; }
+        #canvasContainer { flex-grow: 1; border: 1px solid #ccc; overflow: hidden; position: relative; }
+        canvas { display: block; }
+
+        @media (max-width: 860px) { /* Adjusted breakpoint */
+            #mainContainer { flex-direction: column; }
+            #inputControlsContainer { width: 100%; border-right: none; border-bottom: 1px solid #dee2e6; max-height: 50vh; }
+            #canvasContainer { min-height: 45vh; }
+            #simulationControls { flex-direction: column; align-items: stretch; }
+            button { width: 100%; margin-bottom: 5px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="simulationControls">
+        <button id="loadAllCargoButton">裝載所有已定義貨物</button>
+        <button id="clearButton">清除貨櫃</button>
+        <div id="stats">已裝載: 0 箱</div>
+    </div>
+
+    <div id="mainContainer">
+        <div id="inputControlsContainer">
+            <div class="input-group">
+                <label for="containerSizeSelect">選擇貨櫃尺寸:</label>
+                <select id="containerSizeSelect">
+                    <option value="20">20ft 標準鋼製貨櫃</option>
+                    <option value="40">40ft 標準鋼製貨櫃</option>
+                    <option value="40HQ">40ft High Cube 鋼製貨櫃</option>
+                </select>
+            </div>
+            <h3>定義新貨物類型</h3>
+            <div class="input-group">
+                <label for="cargoName">貨物名稱:</label>
+                <input type="text" id="cargoName" value="貨物A">
+            </div>
+            <div class="input-group">
+                <label for="cargoLength">長度 (cm):</label>
+                <input type="number" id="cargoLength" value="40" min="1">
+            </div>
+            <div class="input-group">
+                <label for="cargoWidth">寬度 (cm):</label>
+                <input type="number" id="cargoWidth" value="50" min="1">
+            </div>
+            <div class="input-group">
+                <label for="cargoHeight">高度 (cm):</label>
+                <input type="number" id="cargoHeight" value="30" min="1">
+            </div>
+            <div class="input-group">
+                <label for="cargoQuantity">箱數:</label>
+                <input type="number" id="cargoQuantity" value="50" min="1">
+            </div>
+            <div class="input-group">
+                <label for="cargoColor">顏色:</label>
+                <input type="color" id="cargoColor" value="#007bff">
+            </div>
+            <button id="addCargoTypeButton" style="background-color: #28a745;">加入此貨物類型到列表</button>
+
+            <h3 style="margin-top: 20px;">已定義貨物列表</h3>
+            <div id="cargoItemsList">
+                <p id="emptyListMsg">尚未定義任何貨物類型。</p>
+            </div>
+
+            <h3 style="margin-top: 20px;">全局裝載選項</h3>
+            <div class="checkbox-group">
+                <input type="checkbox" id="nonStackable">
+                <label for="nonStackable">不可堆疊 (所有貨物)</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="uprightOnly" checked>
+                <label for="uprightOnly">不可側放 (所有貨物，維持輸入高度為實際高度)</label>
+            </div>
+        </div>
+
+        <div id="canvasContainer"></div>
+    </div>
+
+    <script>
+        // --- Constants ---
+        let CONTAINER_INTERNAL_L_CM = 1203.2;
+        let CONTAINER_INTERNAL_W_CM = 235.2;
+        let CONTAINER_INTERNAL_H_CM = 238.5;
+
+        // --- Three.js Setup ---
+        let scene, camera, renderer, controls;
+        let containerMesh, placedBoxMeshes = [];
+        const canvasContainer = document.getElementById('canvasContainer');
+
+        // --- Input Elements ---
+        const cargoNameInput = document.getElementById('cargoName');
+        const cargoLengthInput = document.getElementById('cargoLength');
+        const cargoWidthInput = document.getElementById('cargoWidth');
+        const cargoHeightInput = document.getElementById('cargoHeight');
+        const cargoQuantityInput = document.getElementById('cargoQuantity');
+        const cargoColorInput = document.getElementById('cargoColor');
+        
+        const addCargoTypeButton = document.getElementById('addCargoTypeButton');
+        const cargoItemsListDiv = document.getElementById('cargoItemsList');
+        const emptyListMsg = document.getElementById('emptyListMsg');
+
+        const nonStackableInput = document.getElementById('nonStackable');
+        const uprightOnlyInput = document.getElementById('uprightOnly');
+        const loadAllCargoButton = document.getElementById('loadAllCargoButton');
+        const clearButton = document.getElementById('clearButton');
+
+        let cargoItemsData = []; // Array to store definitions of multiple cargo types
+        let nextCargoId = 0;
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xeeeeee);
+
+            camera = new THREE.PerspectiveCamera(75, canvasContainer.clientWidth / canvasContainer.clientHeight, 0.1, 2000);
+            camera.position.set(CONTAINER_INTERNAL_W_CM * 0.7, CONTAINER_INTERNAL_H_CM * 1.2, CONTAINER_INTERNAL_L_CM * 0.5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+            canvasContainer.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.target.set(0, CONTAINER_INTERNAL_H_CM / 4, 0);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = CONTAINER_INTERNAL_W_CM / 2;
+            controls.maxDistance = CONTAINER_INTERNAL_L_CM * 1.5;
+            controls.maxPolarAngle = Math.PI / 1.9; // Allow slightly more angle
+            controls.update();
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            directionalLight.position.set(150, 300, 200);
+            scene.add(directionalLight);
+            
+            const containerGeom = new THREE.BoxGeometry(CONTAINER_INTERNAL_W_CM, CONTAINER_INTERNAL_H_CM, CONTAINER_INTERNAL_L_CM);
+            const edges = new THREE.EdgesGeometry(containerGeom);
+            containerMesh = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x333333, linewidth: 1 }));
+            scene.add(containerMesh);
+            
+            const floorGeometry = new THREE.PlaneGeometry(CONTAINER_INTERNAL_L_CM * 1.5, CONTAINER_INTERNAL_L_CM * 1.5);
+            const floorMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc, side: THREE.DoubleSide });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.y = -CONTAINER_INTERNAL_H_CM / 2 -1;
+            scene.add(floor);
+
+            animate();
+            setupEventListeners();
+            onWindowResize();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            if (!renderer || !camera || !canvasContainer) return;
+            const newWidth = canvasContainer.clientWidth;
+            const newHeight = canvasContainer.clientHeight;
+            camera.aspect = newWidth / newHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(newWidth, newHeight);
+        }
+        window.addEventListener('resize', onWindowResize, false);
+
+        function setupEventListeners() {
+            addCargoTypeButton.addEventListener('click', handleAddCargoType);
+            loadAllCargoButton.addEventListener('click', handleLoadAllCargo);
+            clearButton.addEventListener('click', clearCargoVisuals);
+            document.getElementById('containerSizeSelect').addEventListener('change', function() {
+                updateContainerDimensions(this.value);
+            });
+        }
+
+        function updateContainerDimensions(selectedSize) {
+            if (selectedSize === "20") {
+                CONTAINER_INTERNAL_L_CM = 589.6;
+                CONTAINER_INTERNAL_W_CM = 235.0;
+                CONTAINER_INTERNAL_H_CM = 239.3;
+            } else if (selectedSize === "40") {
+                CONTAINER_INTERNAL_L_CM = 1203.2;
+                CONTAINER_INTERNAL_W_CM = 235.0;
+                CONTAINER_INTERNAL_H_CM = 239.3;
+            } else if (selectedSize === "40HQ") {
+                CONTAINER_INTERNAL_L_CM = 1203.2;
+                CONTAINER_INTERNAL_W_CM = 235.0;
+                CONTAINER_INTERNAL_H_CM = 269.7;
+            }
+            onWindowResize();
+
+            // Rebuild container frame with new dimensions
+            scene.remove(containerMesh);
+            const updatedGeom = new THREE.BoxGeometry(CONTAINER_INTERNAL_W_CM, CONTAINER_INTERNAL_H_CM, CONTAINER_INTERNAL_L_CM);
+            const updatedEdges = new THREE.EdgesGeometry(updatedGeom);
+            containerMesh = new THREE.LineSegments(updatedEdges, new THREE.LineBasicMaterial({ color: 0x333333, linewidth: 1 }));
+            scene.add(containerMesh);
+
+            // Optional: Update camera and controls to frame the new container size
+            camera.position.set(CONTAINER_INTERNAL_W_CM * 0.7, CONTAINER_INTERNAL_H_CM * 1.2, CONTAINER_INTERNAL_L_CM * 0.5);
+            controls.target.set(0, CONTAINER_INTERNAL_H_CM / 4, 0);
+            controls.update();
+        }
+
+        function handleAddCargoType() {
+            const name = cargoNameInput.value.trim() || "未命名貨物";
+            const length = parseFloat(cargoLengthInput.value);
+            const width = parseFloat(cargoWidthInput.value);
+            const height = parseFloat(cargoHeightInput.value);
+            const quantity = parseInt(cargoQuantityInput.value);
+            const color = cargoColorInput.value;
+
+            if (isNaN(length) || isNaN(width) || isNaN(height) || isNaN(quantity) ||
+                length <= 0 || width <= 0 || height <= 0 || quantity <= 0) {
+                alert("請輸入有效的貨物尺寸 (長寬高) 和數量 (正數)。");
+                return;
+            }
+
+            cargoItemsData.push({
+                id: nextCargoId++,
+                name: name,
+                length: length,
+                width: width,
+                height: height,
+                quantity: quantity,
+                color: color,
+                loadedCount: 0 // Track how many of this type are loaded
+            });
+            renderCargoItemsList();
+            // Optionally, clear or increment default name for next item
+            cargoNameInput.value = "貨物" + String.fromCharCode(65 + (cargoItemsData.length % 26)); // Cycles A-Z
+        }
+
+        function renderCargoItemsList() {
+            cargoItemsListDiv.innerHTML = ''; // Clear current list
+            if (cargoItemsData.length === 0) {
+                cargoItemsListDiv.appendChild(emptyListMsg);
+                emptyListMsg.style.display = 'block';
+                return;
+            }
+            emptyListMsg.style.display = 'none';
+
+            cargoItemsData.forEach(item => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'cargo-item-display';
+                itemDiv.innerHTML = `
+                    <div style="display: flex; align-items: center;">
+                        <div class="cargo-item-color-swatch" style="background-color: ${item.color};"></div>
+                        <div class="cargo-item-details">
+                            <strong>${item.name}</strong> (${item.quantity} 箱)
+                            <span>尺寸: ${item.length}x${item.width}x${item.height} cm</span>
+                        </div>
+                    </div>
+                    <div class="cargo-item-actions">
+                        <button data-id="${item.id}" class="remove-item-btn" style="background-color: #dc3545; color:white;">移除</button>
+                    </div>
+                `;
+                cargoItemsListDiv.appendChild(itemDiv);
+            });
+
+            // Add event listeners for new remove buttons
+            document.querySelectorAll('.remove-item-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const itemIdToRemove = parseInt(this.dataset.id);
+                    cargoItemsData = cargoItemsData.filter(item => item.id !== itemIdToRemove);
+                    renderCargoItemsList();
+                });
+            });
+        }
+
+
+        function updateStats(totalCount) {
+            document.getElementById('stats').textContent = `已裝載: ${totalCount} 箱`;
+        }
+
+        function clearCargoVisuals() {
+            placedBoxMeshes.forEach(group => scene.remove(group));
+            placedBoxMeshes = [];
+            cargoItemsData.forEach(item => item.loadedCount = 0); // Reset loaded counts
+            updateStats(0);
+        }
+        
+        function createLabelTexture(text, faceWidth, faceDepth, textColor = '#333333', bgColor = '#FFFFFF') {
+            const canvas = document.createElement('canvas');
+            const canvasWidth = Math.min(256, Math.max(128, faceWidth * 4)); 
+            const canvasHeight = Math.min(128, Math.max(64, faceDepth * 2));
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            
+            const context = canvas.getContext('2d');
+            context.fillStyle = bgColor; 
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            context.font = `bold ${Math.min(canvasHeight * 0.4, canvasWidth * 0.12, 18)}px Arial`;
+            context.fillStyle = textColor; 
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(text, canvas.width / 2, canvas.height / 2);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            return texture;
+        }
+
+        function addBoxMesh(centerX, centerY, centerZ, geomL, geomH, geomD, labelText, boxColor) {
+            const boxGroup = new THREE.Group();
+
+            const geometry = new THREE.BoxGeometry(geomL, geomH, geomD);
+            
+            // Determine text color based on boxColor luminance
+            const hexColor = boxColor.startsWith('#') ? boxColor.substring(1) : boxColor;
+            const r = parseInt(hexColor.substring(0,2), 16);
+            const g = parseInt(hexColor.substring(2,4), 16);
+            const b = parseInt(hexColor.substring(4,6), 16);
+            const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            const labelTextColor = luminance > 128 ? '#000000' : '#FFFFFF'; // Dark text on light, light text on dark
+
+            const plainMaterial = new THREE.MeshStandardMaterial({ color: boxColor, roughness: 0.7, metalness: 0.1 });
+            const labelTexture = createLabelTexture(labelText, geomL, geomD, labelTextColor, boxColor); 
+            const labelMaterial = new THREE.MeshStandardMaterial({ map: labelTexture, roughness: 0.7, metalness: 0.1 });
+
+            const materials = [ plainMaterial, plainMaterial, labelMaterial, plainMaterial, plainMaterial, plainMaterial ];
+            
+            const boxMesh = new THREE.Mesh(geometry, materials);
+            boxGroup.add(boxMesh);
+
+            const edgesGeom = new THREE.EdgesGeometry(geometry);
+            const outlineColor = luminance > 128 ? 0x000000 : 0xFFFFFF; // Black outline for light, white for dark
+            const edgeMaterial = new THREE.LineBasicMaterial({ color: outlineColor, linewidth: 1, transparent: true, opacity: 0.6 });
+            const boxEdges = new THREE.LineSegments(edgesGeom, edgeMaterial);
+            boxGroup.add(boxEdges);
+
+            boxGroup.position.set(centerX, centerY, centerZ);
+            scene.add(boxGroup);
+            placedBoxMeshes.push(boxGroup);
+        }
+        
+        function handleLoadAllCargo() {
+            if (cargoItemsData.length === 0) {
+                alert("請先定義至少一種貨物類型並加入列表。");
+                return;
+            }
+            clearCargoVisuals();
+            loadAllCargoButton.disabled = true;
+            
+            const isNonStackable = nonStackableInput.checked;
+            const isUprightOnly = uprightOnlyInput.checked;
+            let totalBoxesPlaced = 0;
+
+            // Simple strategy: iterate through cargoItemsData and try to load each type.
+            // A more advanced strategy would involve sorting items or more complex placement logic.
+            for (const item of cargoItemsData) {
+                if (item.loadedCount >= item.quantity) continue; // Already fully loaded this item type
+
+                const orientations = [];
+                orientations.push({ geomL: item.length, geomD: item.width, geomH: item.height });
+                orientations.push({ geomL: item.width, geomD: item.length, geomH: item.height });
+
+                if (!isUprightOnly) {
+                    if (item.length !== item.height) {
+                        orientations.push({ geomL: item.width, geomD: item.height, geomH: item.length });
+                        orientations.push({ geomL: item.height, geomD: item.width, geomH: item.length });
+                    }
+                    if (item.width !== item.height && item.width !== item.length) {
+                         orientations.push({ geomL: item.length, geomD: item.height, geomH: item.width });
+                         orientations.push({ geomL: item.height, geomD: item.length, geomH: item.width });
+                    }
+                }
+                orientations.sort((a, b) => (b.geomL * b.geomD) - (a.geomL * a.geomD) || a.geomH - b.geomH);
+                
+                // --- Start of iterative placement for the current item type ---
+                // This part needs to be inside the loop for each item type,
+                // but the currentX, currentY, currentZ need to be persistent across calls
+                // or the packing space needs to be managed more globally.
+                // For this iteration, we'll reset packing for each item type, which is NOT optimal
+                // but demonstrates multi-item loading. A true bin packer is much more complex.
+
+                // A better approach would be to have one main packing loop
+                // and inside it, try to fit *any* of the available (not fully loaded) cargo items.
+                // The current simplified approach will fill with item 1, then item 2, etc. from the bottom up.
+
+                // --- Simplified packing loop for current item ---
+                let currentY = 0; 
+                // Loop until this item type is fully loaded or no more space in this pass
+                while (currentY < CONTAINER_INTERNAL_H_CM && item.loadedCount < item.quantity) {
+                    let layerMaxHeight = 0; 
+                    let currentZ = 0; 
+                    while (currentZ < CONTAINER_INTERNAL_L_CM && item.loadedCount < item.quantity) {
+                        let rowMaxDepth = 0; 
+                        let currentX = 0; 
+                        while (currentX < CONTAINER_INTERNAL_W_CM && item.loadedCount < item.quantity) {
+                            let placedThisIteration = false;
+                            for (const orient of orientations) {
+                                const boxGeomL = orient.geomL; 
+                                const boxGeomD = orient.geomD; 
+                                const boxGeomH = orient.geomH; 
+
+                                if (isNonStackable && currentY > 0 && totalBoxesPlaced > 0) continue; 
+
+                                // TODO: Collision detection with already placed boxes of *other* types.
+                                // This is the major missing piece for a true multi-item packer.
+                                // For now, it assumes empty space or space occupied by the *same ongoing layer*.
+                                if (currentX + boxGeomL <= CONTAINER_INTERNAL_W_CM + 0.01 && 
+                                    currentY + boxGeomH <= CONTAINER_INTERNAL_H_CM + 0.01 &&
+                                    currentZ + boxGeomD <= CONTAINER_INTERNAL_L_CM + 0.01) {
+                                    
+                                    const centerX = (currentX + boxGeomL / 2) - CONTAINER_INTERNAL_W_CM / 2;
+                                    const centerY = (currentY + boxGeomH / 2) - CONTAINER_INTERNAL_H_CM / 2;
+                                    const centerZ = (currentZ + boxGeomD / 2) - CONTAINER_INTERNAL_L_CM / 2;
+                                    
+                                    addBoxMesh(centerX, centerY, centerZ, boxGeomL, boxGeomH, boxGeomD, item.name, item.color);
+                                    item.loadedCount++;
+                                    totalBoxesPlaced++;
+                                    
+                                    currentX += boxGeomL; 
+                                    rowMaxDepth = Math.max(rowMaxDepth, boxGeomD);
+                                    layerMaxHeight = Math.max(layerMaxHeight, boxGeomH);
+                                    placedThisIteration = true;
+                                    if (item.loadedCount >= item.quantity) break; 
+                                    break; 
+                                }
+                            } 
+                            if (item.loadedCount >= item.quantity) break; 
+                            if (!placedThisIteration) { break; }
+                        } 
+                        if (item.loadedCount >= item.quantity) break; 
+                        if (rowMaxDepth === 0 && currentX > 0) { } else if (rowMaxDepth === 0) { break; }
+                        currentZ += rowMaxDepth; 
+                    } 
+                    if (item.loadedCount >= item.quantity) break; 
+                    if (isNonStackable && totalBoxesPlaced > 0) break; 
+                    if (layerMaxHeight === 0 && currentZ > 0) { } else if (layerMaxHeight === 0) { break; }
+                    currentY += layerMaxHeight; 
+                } // End Y loop for current item
+            } // End loop for cargoItemsData
+
+            console.log(`所有貨物裝載嘗試完成。總共裝載: ${totalBoxesPlaced} 箱`);
+            updateStats(totalBoxesPlaced);
+            loadAllCargoButton.disabled = false;
+            renderCargoItemsList(); // Update list to show loaded counts (though not displayed yet)
+        }
+
+        // --- Initialize ---
+        init();
+        renderCargoItemsList(); // Initial render for the empty message
+    </script>
+</body>
+</html>
