@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Container Loading Planner</title>
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+  <div id="topbar">
+    <button id="packBtn">▶ 裝載</button>
+    <button id="clearBtn" class="danger">清除</button>
+    <button id="importBtn" class="secondary">匯入 JSON</button>
+    <button id="exportBtn" class="secondary">匯出 JSON</button>
+    <button id="demoBtn" class="secondary">載入示範</button>
+    <input type="file" id="importFile" accept=".json" style="display:none">
+    <div id="stats">尚未裝載</div>
+  </div>
+
+  <div id="main">
+    <aside id="sidebar">
+      <section>
+        <h3>選擇貨櫃</h3>
+        <div class="field">
+          <select id="containerSelect"></select>
+        </div>
+        <div id="containerInfo"></div>
+      </section>
+
+      <section>
+        <h3>新增貨物類型</h3>
+        <div class="field">
+          <label for="cargoName">名稱</label>
+          <input type="text" id="cargoName" value="貨物A">
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="cargoL">長 (cm)</label>
+            <input type="number" id="cargoL" value="100" min="1">
+          </div>
+          <div class="field">
+            <label for="cargoW">寬 (cm)</label>
+            <input type="number" id="cargoW" value="80" min="1">
+          </div>
+          <div class="field">
+            <label for="cargoH">高 (cm)</label>
+            <input type="number" id="cargoH" value="60" min="1">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="cargoWeight">重量 (kg/箱)</label>
+            <input type="number" id="cargoWeight" value="10" min="0" step="0.1">
+          </div>
+          <div class="field">
+            <label for="cargoQty">數量</label>
+            <input type="number" id="cargoQty" value="20" min="1">
+          </div>
+        </div>
+        <div class="field">
+          <label for="cargoColor">顏色</label>
+          <input type="color" id="cargoColor" value="#3498db">
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="cargoMaxLayers">最大堆疊層數</label>
+            <input type="number" id="cargoMaxLayers" value="99" min="1">
+          </div>
+          <div class="field">
+            <label for="cargoMaxLoadTop">頂壓上限 (kg)</label>
+            <input type="number" id="cargoMaxLoadTop" value="500" min="0">
+          </div>
+        </div>
+        <div class="field">
+          <label for="cargoSupportRatio">支撐比例下限 (%)</label>
+          <input type="number" id="cargoSupportRatio" value="80" min="0" max="100">
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="cargoYaw" checked>
+          <label for="cargoYaw">允許平面旋轉 90° (Yaw)</label>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="cargoThisSideUp" checked>
+          <label for="cargoThisSideUp">↑ This Side Up（不可翻面）</label>
+        </div>
+        <button id="addCargoBtn" class="add-btn">+ 加入貨物</button>
+      </section>
+
+      <section>
+        <h3>已定義貨物</h3>
+        <div id="cargoList"></div>
+        <div id="cargoListEmpty">尚未新增任何貨物</div>
+      </section>
+
+      <section>
+        <h3>顯示選項</h3>
+        <div class="field">
+          <label for="opacitySlider">透明度</label>
+          <input type="range" id="opacitySlider" min="20" max="100" value="100">
+        </div>
+      </section>
+    </aside>
+
+    <div id="canvasWrap">
+      <div id="canvas"></div>
+    </div>
+  </div>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

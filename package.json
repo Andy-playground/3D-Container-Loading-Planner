@@ -1,0 +1,10 @@
+{
+  "name": "3d-container-loading-planner",
+  "version": "1.0.0-mvp",
+  "description": "3D container loading planner with extreme-point bin-packing",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/packer.test.js"
+  },
+  "license": "MIT"
+}
