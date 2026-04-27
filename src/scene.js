@@ -8,8 +8,14 @@ let containerGroup;       // wireframe + door indicator
 let boxesGroup;           // all rendered boxes
 let canvasEl;
 let opacity = 1.0;
+let labelsVisible = true;
+let highlightMesh = null;
 
 const GAP_BETWEEN_CONTAINERS = 200; // cm, in world units
+
+// Listeners for box click events
+const boxClickListeners = [];
+export function onBoxClick(fn) { boxClickListeners.push(fn); }
 
 export function initScene(canvasContainerEl) {
   canvasEl = canvasContainerEl;
@@ -30,6 +36,7 @@ export function initScene(canvasContainerEl) {
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
+  controls.zoomSpeed = 2.0;
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
   const dir = new THREE.DirectionalLight(0xffffff, 0.7);
@@ -44,10 +51,52 @@ export function initScene(canvasContainerEl) {
   scene.add(boxesGroup);
 
   window.addEventListener('resize', onResize);
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    dragStart = { x: e.clientX, y: e.clientY };
+  });
+  renderer.domElement.addEventListener('click', onCanvasClick);
   animate();
 
   // Debug hook
   window.__clp = { scene, camera, controls, renderer, THREE };
+}
+
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+let dragStart = null;
+function onCanvasClick(event) {
+  // Skip if pointer dragged (orbit), only handle simple clicks
+  if (dragStart && Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y) > 5) {
+    dragStart = null;
+    return;
+  }
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  ndc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObjects(boxesGroup.children, false);
+  const hit = hits.find((h) => h.object.isMesh && h.object.userData.placement);
+  if (hit) {
+    setHighlight(hit.object);
+    boxClickListeners.forEach((fn) => fn(hit.object.userData.placement));
+  } else {
+    setHighlight(null);
+    boxClickListeners.forEach((fn) => fn(null));
+  }
+}
+
+function setHighlight(mesh) {
+  if (highlightMesh && highlightMesh !== mesh) {
+    if (Array.isArray(highlightMesh.material)) {
+      highlightMesh.material.forEach((m) => { m.emissive?.setHex(0x000000); });
+    }
+  }
+  if (mesh) {
+    if (Array.isArray(mesh.material)) {
+      mesh.material.forEach((m) => { m.emissive?.setHex(0x444400); });
+    }
+  }
+  highlightMesh = mesh;
 }
 
 function onResize() {
@@ -209,23 +258,31 @@ function drawContainerFrame(spec, offsetX) {
 function drawBox(p, offsetX) {
   const geom = new THREE.BoxGeometry(p.L, p.H, p.W);
 
-  // Top face: name + icons (full detail, larger)
-  const topTex = makeBoxFaceTexture(p, p.L, p.W, { showIcons: true });
-  // End faces (+x / -x = short ends along length direction): WxH
-  const endTex = makeBoxFaceTexture(p, p.W, p.H, { showIcons: true });
-  // Side faces (+z / -z = long sides): LxH
-  const sideTex = makeBoxFaceTexture(p, p.L, p.H, { showIcons: true });
+  const baseColor = p.color || '#3498db';
 
-  const baseMat = (tex) => new THREE.MeshStandardMaterial({
-    map: tex,
-    transparent: opacity < 1,
-    opacity,
-    roughness: 0.7,
-    metalness: 0.05,
-  });
+  // Build the 6 materials with or without textures depending on labelsVisible
+  const buildMat = (tex) => {
+    const m = new THREE.MeshStandardMaterial({
+      transparent: opacity < 1,
+      opacity,
+      roughness: 0.7,
+      metalness: 0.05,
+    });
+    if (labelsVisible && tex) {
+      m.map = tex;
+      m.color = new THREE.Color('#ffffff');
+    } else {
+      m.color = new THREE.Color(baseColor);
+    }
+    return m;
+  };
+
+  const topTex = labelsVisible ? makeBoxFaceTexture(p, p.L, p.W) : null;
+  const endTex = labelsVisible ? makeBoxFaceTexture(p, p.W, p.H) : null;
+  const sideTex = labelsVisible ? makeBoxFaceTexture(p, p.L, p.H) : null;
 
   const bottomMat = new THREE.MeshStandardMaterial({
-    color: p.color || '#3498db',
+    color: baseColor,
     transparent: opacity < 1,
     opacity,
     roughness: 0.7,
@@ -234,15 +291,16 @@ function drawBox(p, offsetX) {
 
   // Material order: [+x, -x, +y, -y, +z, -z]
   const materials = [
-    baseMat(endTex),  // +x end
-    baseMat(endTex),  // -x end
-    baseMat(topTex),  // +y top
-    bottomMat,        // -y bottom (no label)
-    baseMat(sideTex), // +z side
-    baseMat(sideTex), // -z side
+    buildMat(endTex),
+    buildMat(endTex),
+    buildMat(topTex),
+    bottomMat,
+    buildMat(sideTex),
+    buildMat(sideTex),
   ];
   const mesh = new THREE.Mesh(geom, materials);
   mesh.position.set(offsetX + p.x + p.L / 2, p.z + p.H / 2, p.y + p.W / 2);
+  mesh.userData.placement = { ...p, worldX: mesh.position.x, worldY: mesh.position.y, worldZ: mesh.position.z };
 
   // Outline
   const edges = new THREE.EdgesGeometry(geom);
@@ -256,6 +314,41 @@ function drawBox(p, offsetX) {
 
   boxesGroup.add(mesh);
   boxesGroup.add(outline);
+}
+
+export function setLabelsVisible(v) {
+  labelsVisible = !!v;
+  // Re-create textures or strip them on existing materials
+  for (const mesh of boxesGroup.children) {
+    if (!mesh.isMesh || !mesh.userData.placement) continue;
+    const p = mesh.userData.placement;
+    const baseColor = p.color || '#3498db';
+    if (Array.isArray(mesh.material)) {
+      // Faces: 0 +x end, 1 -x end, 2 +y top, 3 -y bottom, 4 +z side, 5 -z side
+      const facePairs = [
+        [0, p.W, p.H], [1, p.W, p.H],
+        [2, p.L, p.W],
+        [4, p.L, p.H], [5, p.L, p.H],
+      ];
+      if (labelsVisible) {
+        for (const [idx, a, b] of facePairs) {
+          const m = mesh.material[idx];
+          m.map?.dispose();
+          m.map = makeBoxFaceTexture(p, a, b);
+          m.color = new THREE.Color('#ffffff');
+          m.needsUpdate = true;
+        }
+      } else {
+        for (const [idx] of facePairs) {
+          const m = mesh.material[idx];
+          m.map?.dispose();
+          m.map = null;
+          m.color = new THREE.Color(baseColor);
+          m.needsUpdate = true;
+        }
+      }
+    }
+  }
 }
 
 /**

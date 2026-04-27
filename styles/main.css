@@ -167,6 +167,61 @@ body {
 }
 #canvas { width: 100%; height: 100%; }
 
+#detailsPanel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 280px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  font-size: 0.85em;
+  overflow: hidden;
+  z-index: 10;
+}
+#detailsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #007bff;
+  color: #fff;
+  font-weight: 600;
+}
+#detailsClose {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 1.1em;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+#detailsBody { padding: 10px 12px; }
+.d-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px dashed #eee;
+}
+.d-row:last-child { border-bottom: none; }
+.d-row span:first-child { color: #666; flex-shrink: 0; }
+.d-row strong { text-align: right; }
+
+.badge {
+  display: inline-block;
+  font-size: 0.7em;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.badge.urgent { background: #ffc107; color: #333; }
+.badge.lifo { background: #6f42c1; color: #fff; }
+
 @media (max-width: 860px) {
   #main { flex-direction: column; }
   #sidebar { width: 100%; max-height: 50vh; border-right: none; border-bottom: 1px solid #dee2e6; }

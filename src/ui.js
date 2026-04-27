@@ -12,6 +12,8 @@ const state = {
 const listeners = {
   changed: [],
   pack: [],
+  containerChanged: [],
+  labelsToggle: [],
 };
 
 export function on(event, fn) {
@@ -47,6 +49,7 @@ function bindContainerSelect() {
     renderContainerInfo();
     saveToStorage();
     emit('changed');
+    emit('containerChanged');
   });
 }
 
@@ -63,7 +66,10 @@ function bindCargoForm() {
     const maxLoadOnTopKg = parseFloat(document.getElementById('cargoMaxLoadTop').value) || Infinity;
     const supportRatioMin = (parseFloat(document.getElementById('cargoSupportRatio').value) || 80) / 100;
     const allowYaw = document.getElementById('cargoYaw').checked;
+    const allowPitch = document.getElementById('cargoPitch').checked;
+    const allowRoll = document.getElementById('cargoRoll').checked;
     const thisSideUp = document.getElementById('cargoThisSideUp').checked;
+    const priority = document.getElementById('cargoPriority').value;
 
     if (!isFinite(length) || !isFinite(width) || !isFinite(height) || !isFinite(quantity) ||
         length <= 0 || width <= 0 || height <= 0 || quantity <= 0) {
@@ -74,10 +80,10 @@ function bindCargoForm() {
     state.cargoTypes.push({
       id: `C${state.nextCargoId++}`,
       name, length, width, height, weightKg, quantity, color,
-      rotatable: { yaw: allowYaw, pitch: false, roll: false },
+      rotatable: { yaw: allowYaw, pitch: allowPitch, roll: allowRoll },
       thisSideUp,
       maxStackLayers, maxLoadOnTopKg, supportRatioMin,
-      priority: 'normal',
+      priority,
     });
 
     // Reset to next default name
@@ -105,6 +111,37 @@ function bindActions() {
   document.getElementById('opacitySlider').addEventListener('input', (e) => {
     emit('changed', { opacity: e.target.value / 100 });
   });
+  document.getElementById('labelsToggle').addEventListener('change', (e) => {
+    emit('labelsToggle', e.target.checked);
+  });
+  document.getElementById('detailsClose')?.addEventListener('click', () => {
+    hideDetails();
+  });
+}
+
+export function showDetails(p) {
+  const panel = document.getElementById('detailsPanel');
+  if (!panel) return;
+  if (!p) { panel.style.display = 'none'; return; }
+  const rotLabel = (p.yaw || p.pitch || p.roll)
+    ? `yaw=${p.yaw}° pitch=${p.pitch}° roll=${p.roll}°`
+    : '原始方向';
+  document.getElementById('detailsBody').innerHTML = `
+    <div class="d-row"><span>名稱</span><strong>${escapeHtml(p.name)}</strong></div>
+    <div class="d-row"><span>所在貨櫃</span>Container ${p.containerNum}</div>
+    <div class="d-row"><span>位置（左下後角）</span>X=${p.x.toFixed(0)} · Y=${p.y.toFixed(0)} · Z=${p.z.toFixed(0)} cm</div>
+    <div class="d-row"><span>實際尺寸 (L×W×H)</span>${p.L}×${p.W}×${p.H} cm</div>
+    <div class="d-row"><span>方向</span>${rotLabel}</div>
+    <div class="d-row"><span>重量</span>${p.weightKg ?? 0} kg</div>
+    <div class="d-row"><span>頂壓上限</span>${p.maxLoadOnTopKg === Infinity || p.maxLoadOnTopKg == null ? '∞' : p.maxLoadOnTopKg + ' kg'}</div>
+    <div class="d-row"><span>限制</span>${p.thisSideUp ? '↑ 此面向上' : ''} ${p.nonStackable ? '⊘ 不可堆疊' : ''}</div>
+  `;
+  panel.style.display = 'block';
+}
+
+function hideDetails() {
+  const panel = document.getElementById('detailsPanel');
+  if (panel) panel.style.display = 'none';
 }
 
 export function renderAll() {
@@ -133,14 +170,20 @@ function renderCargoList() {
   }
   empty.style.display = 'none';
   for (const c of state.cargoTypes) {
+    const rotAxes = [];
+    if (c.rotatable?.yaw) rotAxes.push('Y');
+    if (c.rotatable?.pitch) rotAxes.push('P');
+    if (c.rotatable?.roll) rotAxes.push('R');
+    const priorityBadge = c.priority && c.priority !== 'normal'
+      ? `<span class="badge ${c.priority}">${c.priority}</span>` : '';
     const row = document.createElement('div');
     row.className = 'cargo-row';
     row.innerHTML = `
       <div class="swatch" style="background:${c.color}"></div>
       <div class="cargo-info">
-        <div class="cargo-name">${escapeHtml(c.name)} <span class="qty">×${c.quantity}</span></div>
+        <div class="cargo-name">${escapeHtml(c.name)} <span class="qty">×${c.quantity}</span> ${priorityBadge}</div>
         <div class="cargo-meta">${c.length}×${c.width}×${c.height}cm · ${c.weightKg}kg/箱</div>
-        <div class="cargo-meta">層數≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · 頂壓≤${c.maxLoadOnTopKg === Infinity ? '∞' : c.maxLoadOnTopKg}kg</div>
+        <div class="cargo-meta">層數≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · 頂壓≤${c.maxLoadOnTopKg === Infinity ? '∞' : c.maxLoadOnTopKg}kg · 旋轉:${rotAxes.join('') || '—'}${c.thisSideUp ? ' · ↑' : ''}</div>
       </div>
       <button class="remove-btn" data-id="${c.id}">移除</button>
     `;

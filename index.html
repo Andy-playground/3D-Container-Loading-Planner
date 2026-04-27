@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>3D Container Loading Planner</title>
-  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/main.css?v=5">
 </head>
 <body>
   <div id="topbar">
@@ -75,13 +75,29 @@
           <label for="cargoSupportRatio">支撐比例下限 (%)</label>
           <input type="number" id="cargoSupportRatio" value="80" min="0" max="100">
         </div>
+        <div class="field">
+          <label for="cargoPriority">裝載優先權</label>
+          <select id="cargoPriority">
+            <option value="normal">normal（一般）</option>
+            <option value="urgent">urgent（急件，優先排）</option>
+            <option value="lifo">lifo（後進先出）</option>
+          </select>
+        </div>
         <div class="checkbox-row">
           <input type="checkbox" id="cargoYaw" checked>
-          <label for="cargoYaw">允許平面旋轉 90° (Yaw)</label>
+          <label for="cargoYaw">Yaw 平面 90° 旋轉（L↔W）</label>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="cargoPitch">
+          <label for="cargoPitch">Pitch 翻轉（W↔H，需取消 ↑）</label>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="cargoRoll">
+          <label for="cargoRoll">Roll 翻轉（L↔H，需取消 ↑）</label>
         </div>
         <div class="checkbox-row">
           <input type="checkbox" id="cargoThisSideUp" checked>
-          <label for="cargoThisSideUp">↑ This Side Up（不可翻面）</label>
+          <label for="cargoThisSideUp">↑ This Side Up（鎖定 Pitch/Roll）</label>
         </div>
         <button id="addCargoBtn" class="add-btn">+ 加入貨物</button>
       </section>
@@ -98,14 +114,25 @@
           <label for="opacitySlider">透明度</label>
           <input type="range" id="opacitySlider" min="20" max="100" value="100">
         </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="labelsToggle" checked>
+          <label for="labelsToggle">顯示貨物名稱（5 個面）</label>
+        </div>
       </section>
     </aside>
 
     <div id="canvasWrap">
       <div id="canvas"></div>
+      <div id="detailsPanel" style="display:none">
+        <div id="detailsHeader">
+          <span>貨物明細</span>
+          <button id="detailsClose" aria-label="關閉">✕</button>
+        </div>
+        <div id="detailsBody"></div>
+      </div>
     </div>
   </div>
 
-  <script type="module" src="src/app.js?v=3"></script>
+  <script type="module" src="src/app.js?v=5"></script>
 </body>
 </html>
