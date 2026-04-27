@@ -1,9 +1,9 @@
 // Application orchestration — wires UI ↔ packer ↔ scene
-import { initScene, renderResult, setOpacity } from './scene.js';
-import * as ui from './ui.js';
-import { pack } from './packer.js';
-import { getContainer } from './containers.js';
-import { loadDemo } from './demo.js';
+import { initScene, renderResult, setOpacity } from './scene.js?v=3';
+import * as ui from './ui.js?v=3';
+import { pack } from './packer.js?v=3';
+import { getContainer } from './containers.js?v=3';
+import { loadDemo } from './demo.js?v=3';
 
 function start() {
   initScene(document.getElementById('canvas'));

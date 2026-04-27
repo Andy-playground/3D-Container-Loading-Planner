@@ -96,9 +96,12 @@ function packOneContainer(boxes, container, containerNum) {
     const orientations = getValidOrientations(box);
     let placed = false;
 
-    // Sort EPs: low z first (fill bottom), then y, then x
+    // Sort EPs to encourage back-to-front, bottom-up packing.
+    // Door is at +X end → low x = furthest from door = preferred.
+    // This naturally produces a "staircase to door" pattern when not full,
+    // with tall stacks at the back supporting lighter ones in front.
     const sortedEPs = [...extremePoints].sort(
-      (a, b) => a.z - b.z || a.y - b.y || a.x - b.x
+      (a, b) => a.z - b.z || a.x - b.x || a.y - b.y
     );
 
     for (const ep of sortedEPs) {
@@ -117,6 +120,8 @@ function packOneContainer(boxes, container, containerNum) {
             H: orient.H,
             weightKg: box.weightKg,
             maxLoadOnTopKg: box.maxLoadOnTopKg,
+            thisSideUp: box.thisSideUp,
+            nonStackable: box.maxStackLayers <= 1 || box.maxLoadOnTopKg <= 0,
             yaw: orient.yaw,
             pitch: orient.pitch,
             roll: orient.roll,
