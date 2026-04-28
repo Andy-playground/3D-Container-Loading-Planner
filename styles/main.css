@@ -124,6 +124,34 @@ body {
   border-radius: 5px;
   cursor: pointer;
   font-size: 0.9em;
+  flex: 1;
+}
+.add-btn.editing { background: #fd7e14; }
+.cancel-btn {
+  padding: 8px 12px;
+  background: #6c757d;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+.form-actions { display: flex; gap: 6px; }
+
+#langPicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85em;
+  color: #555;
+  margin-left: 4px;
+}
+#langPicker select {
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9em;
+  background: #fff;
 }
 
 #cargoList { display: flex; flex-direction: column; gap: 6px; }
@@ -148,6 +176,21 @@ body {
 .cargo-name { font-weight: 600; font-size: 0.85em; }
 .cargo-name .qty { color: #007bff; font-weight: normal; }
 .cargo-meta { font-size: 0.72em; color: #666; }
+.cargo-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.edit-btn {
+  padding: 4px 8px;
+  background: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.75em;
+  cursor: pointer;
+}
 .remove-btn {
   padding: 4px 8px;
   background: #dc3545;
@@ -156,6 +199,16 @@ body {
   border-radius: 4px;
   font-size: 0.75em;
   cursor: pointer;
+}
+.editing-row { background: #fff8e1; border-color: #fd7e14; }
+.editing-tag {
+  display: inline-block;
+  font-size: 0.7em;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #fd7e14;
+  color: #fff;
+  margin-left: 4px;
 }
 
 #opacitySlider { width: 100%; }

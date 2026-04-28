@@ -1,9 +1,10 @@
 // Application orchestration — wires UI ↔ packer ↔ scene
-import { initScene, renderResult, setOpacity, setLabelsVisible, onBoxClick } from './scene.js?v=5';
-import * as ui from './ui.js?v=5';
-import { pack } from './packer.js?v=5';
-import { getContainer } from './containers.js?v=5';
-import { loadDemo } from './demo.js?v=5';
+import { initScene, renderResult, setOpacity, setLabelsVisible, onBoxClick } from './scene.js?v=6';
+import * as ui from './ui.js?v=6';
+import { pack } from './packer.js?v=6';
+import { getContainer } from './containers.js?v=6';
+import { loadDemo } from './demo.js?v=6';
+import { t, applyDomI18n } from './i18n.js?v=6';
 
 function start() {
   initScene(document.getElementById('canvas'));
@@ -23,7 +24,7 @@ function start() {
   }
 
   ui.on('pack', () => {
-    if (!runPack()) alert('請先新增至少一種貨物');
+    if (!runPack()) alert(t('alert.noCargo'));
   });
 
   ui.on('containerChanged', () => {
@@ -48,7 +49,7 @@ function start() {
 
   // Demo button
   document.getElementById('demoBtn')?.addEventListener('click', () => {
-    if (!confirm('載入示範資料將覆蓋目前內容，確定？')) return;
+    if (!confirm(t('confirm.demo'))) return;
     loadDemo();
     location.reload();
   });
