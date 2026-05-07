@@ -3,6 +3,7 @@
 
 import { pack } from '../src/packer.js';
 import { getContainer } from '../src/containers.js';
+import { computeCOG, computeAxleLoads, enrichResult } from '../src/analytics.js';
 
 let passed = 0;
 let failed = 0;
@@ -131,6 +132,94 @@ console.log('T5: 多貨櫃自動展開');
   const totalUnplaced = result.unplaced.reduce((s, u) => s + u.count, 0);
   assert(totalPlaced + totalUnplaced === 200, `T5: total mismatch ${totalPlaced}+${totalUnplaced} ≠ 200`);
   console.log(`  → ${result.containers.length} 個貨櫃，已裝 ${totalPlaced}，未裝 ${totalUnplaced}`);
+}
+
+// ===== T6: COG calculation =====
+console.log('T6: 重心計算 (COG)');
+{
+  // Two equal-weight cubes at known positions → COG should be midway
+  const placements = [
+    { x: 0, y: 0, z: 0, L: 100, W: 100, H: 100, weightKg: 10 },
+    { x: 200, y: 0, z: 0, L: 100, W: 100, H: 100, weightKg: 10 },
+  ];
+  const cog = computeCOG(placements);
+  // Centers are at (50,50,50) and (250,50,50) → COG at (150,50,50)
+  assert(Math.abs(cog.x - 150) < 0.01, `T6: COG.x expected 150, got ${cog.x}`);
+  assert(Math.abs(cog.y - 50) < 0.01, `T6: COG.y expected 50, got ${cog.y}`);
+  assert(Math.abs(cog.z - 50) < 0.01, `T6: COG.z expected 50, got ${cog.z}`);
+  assert(cog.totalWeightKg === 20, `T6: totalWeight expected 20, got ${cog.totalWeightKg}`);
+  assert(cog.hasWeight === true, 'T6: hasWeight expected true');
+
+  // Weighted: heavy box at x=0 dominates
+  const heavyLight = [
+    { x: 0, y: 0, z: 0, L: 100, W: 100, H: 100, weightKg: 90 },
+    { x: 200, y: 0, z: 0, L: 100, W: 100, H: 100, weightKg: 10 },
+  ];
+  const cog2 = computeCOG(heavyLight);
+  // (50*90 + 250*10) / 100 = (4500 + 2500) / 100 = 70
+  assert(Math.abs(cog2.x - 70) < 0.01, `T6w: weighted COG.x expected 70, got ${cog2.x}`);
+
+  // Zero-weight fallback to volume centroid
+  const vol = [
+    { x: 0, y: 0, z: 0, L: 100, W: 100, H: 100, weightKg: 0 },
+    { x: 200, y: 0, z: 0, L: 100, W: 100, H: 100, weightKg: 0 },
+  ];
+  const cog3 = computeCOG(vol);
+  assert(cog3.hasWeight === false, 'T6: zero-weight should set hasWeight=false');
+  assert(Math.abs(cog3.x - 150) < 0.01, `T6: vol-centroid COG.x expected 150, got ${cog3.x}`);
+  console.log('  → COG 測試通過 (等重、加權、零重量退回體積中心)');
+}
+
+// ===== T7: Axle load balancing =====
+console.log('T7: 軸載計算 (truck only)');
+{
+  const truck = getContainer('TRUCK_40FT_BOX');
+  const ocean = getContainer('OCEAN_40HQ');
+  const L = truck.internal.length; // 1200
+
+  // COG at exact center → front == rear
+  const center = { x: L / 2, y: 100, z: 100, totalWeightKg: 1000, hasWeight: true };
+  const ax1 = computeAxleLoads(center, truck);
+  assert(ax1 !== null, 'T7: truck axle should compute');
+  assert(Math.abs(ax1.frontKg - ax1.rearKg) < 0.01, `T7: balanced front=rear, got ${ax1.frontKg} vs ${ax1.rearKg}`);
+  assert(ax1.balanced === true, 'T7: center COG should be balanced');
+
+  // COG biased toward door (large x) → rear axle dominates
+  const biasedRear = { x: L * 0.8, y: 100, z: 100, totalWeightKg: 1000, hasWeight: true };
+  const ax2 = computeAxleLoads(biasedRear, truck);
+  assert(ax2.rearKg > ax2.frontKg, `T7: biased COG.x=0.8L should load rear more, got front=${ax2.frontKg} rear=${ax2.rearKg}`);
+
+  // Front + rear must equal total weight (when COG is between axles)
+  assert(Math.abs(ax1.frontKg + ax1.rearKg - 1000) < 0.01, `T7: sum should equal total, got ${ax1.frontKg + ax1.rearKg}`);
+
+  // Non-truck modes return null
+  const axOcean = computeAxleLoads(center, ocean);
+  assert(axOcean === null, 'T7: ocean container should return null axle loads');
+
+  // Zero weight returns null
+  const axZero = computeAxleLoads({ x: 0, y: 0, z: 0, totalWeightKg: 0, hasWeight: false }, truck);
+  assert(axZero === null, 'T7: zero-weight COG should return null axle loads');
+
+  console.log(`  → 中心 COG: 前${ax1.frontKg.toFixed(0)}kg 後${ax1.rearKg.toFixed(0)}kg；偏後 COG: 前${ax2.frontKg.toFixed(0)}kg 後${ax2.rearKg.toFixed(0)}kg`);
+}
+
+// ===== T8: enrichResult integration =====
+console.log('T8: enrichResult 整合');
+{
+  const cargo = [{
+    id: 'X', name: 'X', length: 100, width: 100, height: 100,
+    weightKg: 100, quantity: 30, color: '#abc',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8,
+  }];
+  const truck = getContainer('TRUCK_40FT_BOX');
+  const result = pack(cargo, truck);
+  enrichResult(result, truck);
+  for (const ct of result.containers) {
+    assert(ct.cog && typeof ct.cog.x === 'number', 'T8: each container should have COG');
+    assert(ct.axleLoads && typeof ct.axleLoads.frontKg === 'number', 'T8: truck container should have axleLoads');
+  }
+  console.log(`  → ${result.containers.length} 個貨櫃皆已附加 COG 與軸載`);
 }
 
 // ===== Summary =====

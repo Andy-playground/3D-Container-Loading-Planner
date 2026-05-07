@@ -1,5 +1,6 @@
 // UI: form, cargo list, localStorage, JSON import/export — per SDD §9, §10
 import { CONTAINERS, getContainer } from './containers.js';
+import { t } from './i18n.js';
 
 const STORAGE_KEY = 'clp:current';
 
@@ -14,6 +15,7 @@ const listeners = {
   pack: [],
   containerChanged: [],
   labelsToggle: [],
+  cogToggle: [],
 };
 
 export function on(event, fn) {
@@ -55,7 +57,7 @@ function bindContainerSelect() {
 
 function bindCargoForm() {
   document.getElementById('addCargoBtn').addEventListener('click', () => {
-    const name = document.getElementById('cargoName').value.trim() || `貨物${state.cargoTypes.length + 1}`;
+    const name = document.getElementById('cargoName').value.trim() || `${t('name')} ${state.cargoTypes.length + 1}`;
     const length = parseFloat(document.getElementById('cargoL').value);
     const width = parseFloat(document.getElementById('cargoW').value);
     const height = parseFloat(document.getElementById('cargoH').value);
@@ -73,7 +75,7 @@ function bindCargoForm() {
 
     if (!isFinite(length) || !isFinite(width) || !isFinite(height) || !isFinite(quantity) ||
         length <= 0 || width <= 0 || height <= 0 || quantity <= 0) {
-      alert('請輸入有效的尺寸與數量（正數）');
+      alert(t('inputValidPositive'));
       return;
     }
 
@@ -86,8 +88,7 @@ function bindCargoForm() {
       priority,
     });
 
-    // Reset to next default name
-    document.getElementById('cargoName').value = `貨物${String.fromCharCode(64 + Math.min(state.cargoTypes.length + 1, 26))}`;
+    document.getElementById('cargoName').value = `${t('name')} ${String.fromCharCode(64 + Math.min(state.cargoTypes.length + 1, 26))}`;
     renderCargoList();
     saveToStorage();
     emit('changed');
@@ -97,7 +98,7 @@ function bindCargoForm() {
 function bindActions() {
   document.getElementById('packBtn').addEventListener('click', () => emit('pack'));
   document.getElementById('clearBtn').addEventListener('click', () => {
-    if (state.cargoTypes.length && !confirm('確定清除所有貨物？')) return;
+    if (state.cargoTypes.length && !confirm(t('confirmClear'))) return;
     state.cargoTypes = [];
     renderCargoList();
     saveToStorage();
@@ -114,6 +115,9 @@ function bindActions() {
   document.getElementById('labelsToggle').addEventListener('change', (e) => {
     emit('labelsToggle', e.target.checked);
   });
+  document.getElementById('cogToggle')?.addEventListener('change', (e) => {
+    emit('cogToggle', e.target.checked);
+  });
   document.getElementById('detailsClose')?.addEventListener('click', () => {
     hideDetails();
   });
@@ -125,16 +129,16 @@ export function showDetails(p) {
   if (!p) { panel.style.display = 'none'; return; }
   const rotLabel = (p.yaw || p.pitch || p.roll)
     ? `yaw=${p.yaw}° pitch=${p.pitch}° roll=${p.roll}°`
-    : '原始方向';
+    : '—';
   document.getElementById('detailsBody').innerHTML = `
-    <div class="d-row"><span>名稱</span><strong>${escapeHtml(p.name)}</strong></div>
-    <div class="d-row"><span>所在貨櫃</span>Container ${p.containerNum}</div>
-    <div class="d-row"><span>位置（左下後角）</span>X=${p.x.toFixed(0)} · Y=${p.y.toFixed(0)} · Z=${p.z.toFixed(0)} cm</div>
-    <div class="d-row"><span>實際尺寸 (L×W×H)</span>${p.L}×${p.W}×${p.H} cm</div>
-    <div class="d-row"><span>方向</span>${rotLabel}</div>
-    <div class="d-row"><span>重量</span>${p.weightKg ?? 0} kg</div>
-    <div class="d-row"><span>頂壓上限</span>${p.maxLoadOnTopKg === Infinity || p.maxLoadOnTopKg == null ? '∞' : p.maxLoadOnTopKg + ' kg'}</div>
-    <div class="d-row"><span>限制</span>${p.thisSideUp ? '↑ 此面向上' : ''} ${p.nonStackable ? '⊘ 不可堆疊' : ''}</div>
+    <div class="d-row"><span>${t('name')}</span><strong>${escapeHtml(p.name)}</strong></div>
+    <div class="d-row"><span>${t('container')}</span>${p.containerNum}</div>
+    <div class="d-row"><span>${t('pos')}</span>X=${p.x.toFixed(0)} · Y=${p.y.toFixed(0)} · Z=${p.z.toFixed(0)} cm</div>
+    <div class="d-row"><span>${t('actualDims')}</span>${p.L}×${p.W}×${p.H} cm</div>
+    <div class="d-row"><span>${t('orientation')}</span>${rotLabel}</div>
+    <div class="d-row"><span>${t('weight')}</span>${p.weightKg ?? 0} kg</div>
+    <div class="d-row"><span>${t('topLoadLimit')}</span>${p.maxLoadOnTopKg === Infinity || p.maxLoadOnTopKg == null ? '∞' : p.maxLoadOnTopKg + ' kg'}</div>
+    <div class="d-row"><span>${t('constraints')}</span>${p.thisSideUp ? '↑' : ''} ${p.nonStackable ? '⊘' : ''}</div>
   `;
   panel.style.display = 'block';
 }
@@ -147,6 +151,15 @@ function hideDetails() {
 export function renderAll() {
   renderContainerInfo();
   renderCargoList();
+  // Re-render priority dropdown options text (i18n)
+  const pri = document.getElementById('cargoPriority');
+  if (pri) {
+    const map = { normal: 'priorityNormal', urgent: 'priorityUrgent', lifo: 'priorityLifo' };
+    for (const opt of pri.options) {
+      const k = map[opt.value];
+      if (k) opt.textContent = t(k);
+    }
+  }
 }
 
 function renderContainerInfo() {
@@ -154,8 +167,8 @@ function renderContainerInfo() {
   const info = document.getElementById('containerInfo');
   if (c) {
     info.innerHTML = `
-      <div>內尺寸: ${c.internal.length} × ${c.internal.width} × ${c.internal.height} cm</div>
-      <div>最大載重: ${c.payloadKg.toLocaleString()} kg</div>
+      <div>${c.internal.length} × ${c.internal.width} × ${c.internal.height} cm</div>
+      <div>≤ ${c.payloadKg.toLocaleString()} kg</div>
     `;
   }
 }
@@ -166,6 +179,7 @@ function renderCargoList() {
   listEl.innerHTML = '';
   if (state.cargoTypes.length === 0) {
     empty.style.display = 'block';
+    empty.textContent = t('noCargoYet');
     return;
   }
   empty.style.display = 'none';
@@ -182,10 +196,10 @@ function renderCargoList() {
       <div class="swatch" style="background:${c.color}"></div>
       <div class="cargo-info">
         <div class="cargo-name">${escapeHtml(c.name)} <span class="qty">×${c.quantity}</span> ${priorityBadge}</div>
-        <div class="cargo-meta">${c.length}×${c.width}×${c.height}cm · ${c.weightKg}kg/箱</div>
-        <div class="cargo-meta">層數≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · 頂壓≤${c.maxLoadOnTopKg === Infinity ? '∞' : c.maxLoadOnTopKg}kg · 旋轉:${rotAxes.join('') || '—'}${c.thisSideUp ? ' · ↑' : ''}</div>
+        <div class="cargo-meta">${c.length}×${c.width}×${c.height}cm · ${c.weightKg}kg</div>
+        <div class="cargo-meta">≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · top≤${c.maxLoadOnTopKg === Infinity ? '∞' : c.maxLoadOnTopKg}kg · ${rotAxes.join('') || '—'}${c.thisSideUp ? ' ·↑' : ''}</div>
       </div>
-      <button class="remove-btn" data-id="${c.id}">移除</button>
+      <button class="remove-btn" data-id="${c.id}">✕</button>
     `;
     listEl.appendChild(row);
   }
@@ -199,25 +213,30 @@ function renderCargoList() {
   });
 }
 
-export function renderStats(result) {
+export function renderStats(result, containerSpec) {
   const el = document.getElementById('stats');
   const containers = result.containers ?? [];
   const totalPlaced = containers.reduce((s, ct) => s + ct.placements.length, 0);
   const totalRequested = state.cargoTypes.reduce((s, c) => s + c.quantity, 0);
   const totalUnplaced = result.unplaced.reduce((s, u) => s + u.count, 0);
 
-  let html = `<div><strong>已裝載</strong>: ${totalPlaced} / ${totalRequested} 箱</div>`;
+  let html = `<div><strong>${t('placedLabel')}</strong>: ${totalPlaced} / ${totalRequested}</div>`;
   if (totalUnplaced > 0) {
-    html += `<div class="warn"><strong>未裝載</strong>: ${totalUnplaced} 箱</div>`;
+    html += `<div class="warn"><strong>${t('unplacedLabel')}</strong>: ${totalUnplaced}</div>`;
   }
-  html += `<div><strong>所需貨櫃</strong>: ${containers.length} 個</div>`;
+  html += `<div><strong>${t('containersNeeded')}</strong>: ${containers.length}</div>`;
   for (let i = 0; i < containers.length; i++) {
     const ct = containers[i];
-    html += `<div class="container-stat">
-      Container ${i + 1}: ${ct.placements.length} 箱 ·
-      體積 ${(ct.stats.volumeUtilization * 100).toFixed(1)}% ·
-      重量 ${ct.stats.usedWeightKg.toFixed(0)}/${ct.stats.payloadKg}kg (${(ct.stats.weightUtilization * 100).toFixed(1)}%)
-    </div>`;
+    let line = `${t('container')} ${i + 1}: ${ct.placements.length} · ${t('volume')} ${(ct.stats.volumeUtilization * 100).toFixed(1)}% · ${ct.stats.usedWeightKg.toFixed(0)}/${ct.stats.payloadKg}kg`;
+    if (ct.cog) {
+      line += ` · ${t('cog')} (${ct.cog.x.toFixed(0)}, ${ct.cog.y.toFixed(0)}, ${ct.cog.z.toFixed(0)})`;
+    }
+    html += `<div class="container-stat">${line}</div>`;
+    if (ct.axleLoads) {
+      const a = ct.axleLoads;
+      const cls = a.balanced ? 'ok' : 'warn';
+      html += `<div class="container-stat ${cls}">↳ ${t('axleFront')} ${a.frontKg.toFixed(0)}kg (${(a.frontPct * 100).toFixed(0)}%) · ${t('axleRear')} ${a.rearKg.toFixed(0)}kg (${(a.rearPct * 100).toFixed(0)}%) · ${a.balanced ? t('balanced') : t('notBalanced')}</div>`;
+    }
   }
   el.innerHTML = html;
 }
@@ -260,7 +279,7 @@ function exportJSON() {
   const data = {
     metadata: {
       createdAt: new Date().toISOString(),
-      version: '1.0-mvp',
+      version: '2.0',
       title: 'Loading Plan',
     },
     containerId: state.containerId,
@@ -282,7 +301,7 @@ function importJSON(e) {
   reader.onload = (evt) => {
     try {
       const data = JSON.parse(evt.target.result);
-      if (!confirm('將覆蓋目前所有資料，確定？')) return;
+      if (!confirm(t('confirmOverwrite'))) return;
       if (data.containerId) state.containerId = data.containerId;
       if (Array.isArray(data.cargoTypes)) state.cargoTypes = data.cargoTypes;
       document.getElementById('containerSelect').value = state.containerId;
@@ -290,7 +309,7 @@ function importJSON(e) {
       saveToStorage();
       emit('changed');
     } catch (err) {
-      alert('JSON 格式錯誤：' + err.message);
+      alert(t('jsonError') + err.message);
     }
   };
   reader.readAsText(file);

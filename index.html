@@ -3,24 +3,35 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>3D Container Loading Planner</title>
-  <link rel="stylesheet" href="styles/main.css?v=5">
+  <title data-i18n="title">3D Container Loading Planner</title>
+  <link rel="stylesheet" href="styles/main.css?v=6">
 </head>
 <body>
   <div id="topbar">
-    <button id="packBtn">▶ 裝載</button>
-    <button id="clearBtn" class="danger">清除</button>
-    <button id="importBtn" class="secondary">匯入 JSON</button>
-    <button id="exportBtn" class="secondary">匯出 JSON</button>
-    <button id="demoBtn" class="secondary">載入示範</button>
+    <button id="packBtn" data-i18n="pack">▶ 裝載</button>
+    <button id="clearBtn" class="danger" data-i18n="clear">清除</button>
+    <button id="importBtn" class="secondary" data-i18n="importJson">匯入 JSON</button>
+    <button id="exportBtn" class="secondary" data-i18n="exportJson">匯出 JSON</button>
+
+    <div class="dropdown" id="exportMenu">
+      <button id="exportMenuBtn" class="secondary" data-i18n="exportMenu">匯出 ▾</button>
+      <div class="dropdown-content">
+        <button id="exportTxtBtn" data-i18n="exportTxt">匯出 TXT</button>
+        <button id="exportCsvBtn" data-i18n="exportCsv">匯出 CSV</button>
+        <button id="exportPdfBtn" data-i18n="exportPdf">列印 / PDF</button>
+      </div>
+    </div>
+
+    <button id="demoBtn" class="secondary" data-i18n="loadDemo">載入示範</button>
+    <button id="langBtn" class="secondary" data-i18n="lang">Language</button>
     <input type="file" id="importFile" accept=".json" style="display:none">
-    <div id="stats">尚未裝載</div>
+    <div id="stats" data-i18n="notPackedYet">尚未裝載</div>
   </div>
 
   <div id="main">
     <aside id="sidebar">
       <section>
-        <h3>選擇貨櫃</h3>
+        <h3 data-i18n="chooseContainer">選擇貨櫃</h3>
         <div class="field">
           <select id="containerSelect"></select>
         </div>
@@ -28,95 +39,99 @@
       </section>
 
       <section>
-        <h3>新增貨物類型</h3>
+        <h3 data-i18n="addCargoType">新增貨物類型</h3>
         <div class="field">
-          <label for="cargoName">名稱</label>
+          <label for="cargoName" data-i18n="name">名稱</label>
           <input type="text" id="cargoName" value="貨物A">
         </div>
         <div class="field-row">
           <div class="field">
-            <label for="cargoL">長 (cm)</label>
+            <label for="cargoL" data-i18n="lengthCm">長 (cm)</label>
             <input type="number" id="cargoL" value="100" min="1">
           </div>
           <div class="field">
-            <label for="cargoW">寬 (cm)</label>
+            <label for="cargoW" data-i18n="widthCm">寬 (cm)</label>
             <input type="number" id="cargoW" value="80" min="1">
           </div>
           <div class="field">
-            <label for="cargoH">高 (cm)</label>
+            <label for="cargoH" data-i18n="heightCm">高 (cm)</label>
             <input type="number" id="cargoH" value="60" min="1">
           </div>
         </div>
         <div class="field-row">
           <div class="field">
-            <label for="cargoWeight">重量 (kg/箱)</label>
+            <label for="cargoWeight" data-i18n="weightKg">重量 (kg/箱)</label>
             <input type="number" id="cargoWeight" value="10" min="0" step="0.1">
           </div>
           <div class="field">
-            <label for="cargoQty">數量</label>
+            <label for="cargoQty" data-i18n="quantity">數量</label>
             <input type="number" id="cargoQty" value="20" min="1">
           </div>
         </div>
         <div class="field">
-          <label for="cargoColor">顏色</label>
+          <label for="cargoColor" data-i18n="color">顏色</label>
           <input type="color" id="cargoColor" value="#3498db">
         </div>
         <div class="field-row">
           <div class="field">
-            <label for="cargoMaxLayers">最大堆疊層數</label>
+            <label for="cargoMaxLayers" data-i18n="maxStackLayers">最大堆疊層數</label>
             <input type="number" id="cargoMaxLayers" value="99" min="1">
           </div>
           <div class="field">
-            <label for="cargoMaxLoadTop">頂壓上限 (kg)</label>
+            <label for="cargoMaxLoadTop" data-i18n="maxLoadOnTopKg">頂壓上限 (kg)</label>
             <input type="number" id="cargoMaxLoadTop" value="500" min="0">
           </div>
         </div>
         <div class="field">
-          <label for="cargoSupportRatio">支撐比例下限 (%)</label>
+          <label for="cargoSupportRatio" data-i18n="supportRatioPct">支撐比例下限 (%)</label>
           <input type="number" id="cargoSupportRatio" value="80" min="0" max="100">
         </div>
         <div class="field">
-          <label for="cargoPriority">裝載優先權</label>
+          <label for="cargoPriority" data-i18n="priority">裝載優先權</label>
           <select id="cargoPriority">
-            <option value="normal">normal（一般）</option>
-            <option value="urgent">urgent（急件，優先排）</option>
-            <option value="lifo">lifo（後進先出）</option>
+            <option value="normal">normal</option>
+            <option value="urgent">urgent</option>
+            <option value="lifo">lifo</option>
           </select>
         </div>
         <div class="checkbox-row">
           <input type="checkbox" id="cargoYaw" checked>
-          <label for="cargoYaw">Yaw 平面 90° 旋轉（L↔W）</label>
+          <label for="cargoYaw" data-i18n="yawLabel">Yaw 平面 90° 旋轉（L↔W）</label>
         </div>
         <div class="checkbox-row">
           <input type="checkbox" id="cargoPitch">
-          <label for="cargoPitch">Pitch 翻轉（W↔H，需取消 ↑）</label>
+          <label for="cargoPitch" data-i18n="pitchLabel">Pitch 翻轉（W↔H，需取消 ↑）</label>
         </div>
         <div class="checkbox-row">
           <input type="checkbox" id="cargoRoll">
-          <label for="cargoRoll">Roll 翻轉（L↔H，需取消 ↑）</label>
+          <label for="cargoRoll" data-i18n="rollLabel">Roll 翻轉（L↔H，需取消 ↑）</label>
         </div>
         <div class="checkbox-row">
           <input type="checkbox" id="cargoThisSideUp" checked>
-          <label for="cargoThisSideUp">↑ This Side Up（鎖定 Pitch/Roll）</label>
+          <label for="cargoThisSideUp" data-i18n="thisSideUpLabel">↑ This Side Up（鎖定 Pitch/Roll）</label>
         </div>
-        <button id="addCargoBtn" class="add-btn">+ 加入貨物</button>
+        <button id="addCargoBtn" class="add-btn" data-i18n="addCargo">+ 加入貨物</button>
       </section>
 
       <section>
-        <h3>已定義貨物</h3>
+        <h3 data-i18n="definedCargo">已定義貨物</h3>
         <div id="cargoList"></div>
-        <div id="cargoListEmpty">尚未新增任何貨物</div>
+        <div id="cargoListEmpty" data-i18n="noCargoYet">尚未新增任何貨物</div>
       </section>
 
       <section>
-        <h3>顯示選項</h3>
+        <h3 data-i18n="displayOptions">顯示選項</h3>
         <div class="field">
-          <label for="opacitySlider">透明度</label>
+          <label for="opacitySlider" data-i18n="opacity">透明度</label>
           <input type="range" id="opacitySlider" min="20" max="100" value="100">
         </div>
         <div class="checkbox-row">
           <input type="checkbox" id="labelsToggle" checked>
-          <label for="labelsToggle">顯示貨物名稱（5 個面）</label>
+          <label for="labelsToggle" data-i18n="showLabels">顯示貨物名稱（5 個面）</label>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="cogToggle" checked>
+          <label for="cogToggle" data-i18n="showCog">顯示重心 (COG)</label>
         </div>
       </section>
     </aside>
@@ -125,14 +140,14 @@
       <div id="canvas"></div>
       <div id="detailsPanel" style="display:none">
         <div id="detailsHeader">
-          <span>貨物明細</span>
-          <button id="detailsClose" aria-label="關閉">✕</button>
+          <span data-i18n="cargoDetails">貨物明細</span>
+          <button id="detailsClose" aria-label="close">✕</button>
         </div>
         <div id="detailsBody"></div>
       </div>
     </div>
   </div>
 
-  <script type="module" src="src/app.js?v=5"></script>
+  <script type="module" src="src/app.js?v=6"></script>
 </body>
 </html>

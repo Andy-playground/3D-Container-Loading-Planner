@@ -6,9 +6,11 @@ let scene, camera, renderer, controls;
 let groundGroup;          // floor + grid (resized per render)
 let containerGroup;       // wireframe + door indicator
 let boxesGroup;           // all rendered boxes
+let cogGroup;             // center-of-gravity markers + axle indicators
 let canvasEl;
 let opacity = 1.0;
 let labelsVisible = true;
+let cogVisible = true;
 let highlightMesh = null;
 
 const GAP_BETWEEN_CONTAINERS = 200; // cm, in world units
@@ -49,6 +51,8 @@ export function initScene(canvasContainerEl) {
   scene.add(containerGroup);
   boxesGroup = new THREE.Group();
   scene.add(boxesGroup);
+  cogGroup = new THREE.Group();
+  scene.add(cogGroup);
 
   window.addEventListener('resize', onResize);
   renderer.domElement.addEventListener('pointerdown', (e) => {
@@ -139,15 +143,76 @@ export function renderResult(result, containerSpec) {
     for (const p of containers[i].placements) {
       drawBox(p, offsetX);
     }
+    if (containers[i].cog) {
+      drawCOGMarker(containers[i].cog, containerSpec, offsetX);
+    }
+    if (containers[i].axleLoads) {
+      drawAxleIndicators(containers[i].axleLoads, containerSpec, offsetX);
+    }
   }
 
   frameCamera(containerSpec, containers.length);
+}
+
+function drawCOGMarker(cog, containerSpec, offsetX) {
+  const sphereGeom = new THREE.SphereGeometry(15, 16, 12);
+  const color = cog.hasWeight ? 0xff8800 : 0xaaaaaa;
+  const sphere = new THREE.Mesh(
+    sphereGeom,
+    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6 })
+  );
+  // World mapping: sceneX = packX, sceneY = packZ (vertical), sceneZ = packY
+  sphere.position.set(offsetX + cog.x, cog.z, cog.y);
+  sphere.userData.kind = 'cog';
+  cogGroup.add(sphere);
+
+  // Drop-line to floor for clarity
+  const lineGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(offsetX + cog.x, 0, cog.y),
+    new THREE.Vector3(offsetX + cog.x, cog.z, cog.y),
+  ]);
+  const line = new THREE.Line(lineGeom, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.6 }));
+  line.userData.kind = 'cog';
+  cogGroup.add(line);
+
+  // Label "COG"
+  const label = makeTextSprite('⊕ COG', { fontSize: 36, bgColor: '#ff8800', textColor: '#ffffff', padding: 8 });
+  const lh = 28;
+  label.scale.set(label.userData.aspectRatio * lh, lh, 1);
+  label.position.set(offsetX + cog.x, cog.z + 30, cog.y);
+  label.userData.kind = 'cog';
+  cogGroup.add(label);
+
+  cogGroup.visible = cogVisible;
+}
+
+function drawAxleIndicators(ax, containerSpec, offsetX) {
+  const W = containerSpec.internal.width;
+  const yA = -10; // just below floor
+  const len = W + 60;
+  const color = ax.balanced ? 0x28a745 : 0xdc3545;
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 });
+  for (const x of [ax.axleFrontX, ax.axleRearX]) {
+    const g = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(offsetX + x, yA, -30),
+      new THREE.Vector3(offsetX + x, yA, len - 30),
+    ]);
+    const line = new THREE.Line(g, mat);
+    line.userData.kind = 'cog';
+    cogGroup.add(line);
+  }
+}
+
+export function setCOGVisible(v) {
+  cogVisible = !!v;
+  if (cogGroup) cogGroup.visible = cogVisible;
 }
 
 function clearAll() {
   disposeGroup(groundGroup);
   disposeGroup(containerGroup);
   disposeGroup(boxesGroup);
+  disposeGroup(cogGroup);
 }
 
 function disposeGroup(group) {

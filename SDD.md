@@ -540,10 +540,10 @@ Total Items: 243
 - [ ] M3-5: 相同貨物聚集（3.4）
 
 ### Phase 4: 報表與整合（v2.0）
-- [ ] M4-1: TXT/CSV/PDF 匯出
-- [ ] M4-2: 重心計算
-- [ ] M4-3: 軸載重均衡（truck only）
-- [ ] M4-4: i18n（中/英）
+- [x] M4-1: TXT/CSV/PDF 匯出（PDF 走 `window.print()` 路徑，避免 CJK 字型內嵌問題）
+- [x] M4-2: 重心計算（`src/analytics.js`，3D 場景中以橘色球體 + 落地線標示）
+- [x] M4-3: 軸載重均衡（truck only；前/後軸槓桿規則 + 失衡警示）
+- [x] M4-4: i18n（中/英；`src/i18n.js`，topbar 「Language」按鈕切換）
 
 ### Future（無排程）
 - 危險品分隔規則（IMO/IMDG）
