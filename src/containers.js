@@ -89,10 +89,57 @@ export const CONTAINERS = [
   },
 ];
 
+// ===== Custom (user-defined) containers — persisted in localStorage =====
+const CUSTOM_KEY = 'clp:customContainers';
+
+function hasStorage() {
+  return typeof localStorage !== 'undefined';
+}
+
+export function getCustomContainers() {
+  if (!hasStorage()) return [];
+  try {
+    const raw = localStorage.getItem(CUSTOM_KEY);
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list.filter((c) => c && c.id && c.internal) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addCustomContainer({ id, label, length, width, height, payloadKg }) {
+  const custom = getCustomContainers();
+  const container = {
+    id: id && !custom.some((c) => c.id === id) ? id : `CUSTOM_${Date.now()}_${custom.length}`,
+    mode: 'custom',
+    type: 'CUSTOM',
+    label,
+    internal: { length, width, height },
+    payloadKg,
+  };
+  custom.push(container);
+  if (hasStorage()) {
+    try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom)); } catch {}
+  }
+  return container;
+}
+
+export function removeCustomContainer(id) {
+  const custom = getCustomContainers().filter((c) => c.id !== id);
+  if (hasStorage()) {
+    try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom)); } catch {}
+  }
+}
+
+export function getAllContainers() {
+  return [...CONTAINERS, ...getCustomContainers()];
+}
+
 export function getContainer(id) {
-  return CONTAINERS.find((c) => c.id === id);
+  return getAllContainers().find((c) => c.id === id);
 }
 
 export function getContainersByMode(mode) {
-  return CONTAINERS.filter((c) => c.mode === mode);
+  return getAllContainers().filter((c) => c.mode === mode);
 }

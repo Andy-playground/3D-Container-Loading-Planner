@@ -1,6 +1,6 @@
 {
   "name": "3d-container-loading-planner",
-  "version": "1.0.0-mvp",
+  "version": "3.0.0",
   "description": "3D container loading planner with extreme-point bin-packing",
   "type": "module",
   "scripts": {

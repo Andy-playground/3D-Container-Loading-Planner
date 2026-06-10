@@ -38,14 +38,21 @@ function fmtRot(p) {
   return parts.length ? parts.join(',') : '0';
 }
 
+const REASON_KEYS = { oversize: 'reasonOversize', overweight: 'reasonOverweight', nospace: 'reasonNospace' };
+
+function fmtReasons(u) {
+  const parts = Object.entries(u.reasons ?? {}).map(([r, n]) => `${t(REASON_KEYS[r] ?? r)}×${n}`);
+  return parts.length ? ` (${parts.join(', ')})` : '';
+}
+
 // ===== TXT =====
-export function exportTXT(result, containerSpec) {
+export function exportTXT(result, containerSpec, meta = {}) {
   if (!result?.containers?.length) {
     alert(t('addAtLeastOne'));
     return;
   }
   const lines = [];
-  lines.push(t('printTitle'));
+  lines.push(meta.title || t('printTitle'));
   lines.push('==========================');
   lines.push(`${t('generated')}: ${tsHuman()}`);
   lines.push(`${t('chooseContainer')}: [${containerSpec.mode.toUpperCase()}] ${containerSpec.label}`);
@@ -67,21 +74,24 @@ export function exportTXT(result, containerSpec) {
       const a = ct.axleLoads;
       lines.push(`${t('axleFront')}: ${a.frontKg.toFixed(0)} kg (${(a.frontPct * 100).toFixed(0)}%)  ${t('axleRear')}: ${a.rearKg.toFixed(0)} kg (${(a.rearPct * 100).toFixed(0)}%)  ${a.balanced ? t('balanced') : t('notBalanced')}`);
     }
+    if (ct.lateral && !ct.lateral.ok) {
+      lines.push(`${t('lateralWarn')}: ${t('lateralOffset')} ${ct.lateral.offsetCm.toFixed(1)} cm`);
+    }
     lines.push('');
-    let n = 1;
-    for (const p of ct.placements) {
-      lines.push(`${n}. ${p.name}`);
+    // Items in physical loading order (back of container first)
+    const ordered = [...ct.placements].sort((a, b) => (a.loadSeq ?? 0) - (b.loadSeq ?? 0));
+    for (const p of ordered) {
+      lines.push(`${p.loadSeq ?? '?'}. ${p.name}`);
       lines.push(`   Position: X=${p.x.toFixed(0)}cm, Y=${p.y.toFixed(0)}cm, Z=${p.z.toFixed(0)}cm`);
       lines.push(`   Dimensions: ${p.L}×${p.W}×${p.H}cm`);
       lines.push(`   Weight: ${(p.weightKg ?? 0)}kg  Orientation: ${fmtRot(p)}`);
-      n++;
     }
     lines.push('');
   }
   if (result.unplaced?.length) {
     lines.push(`=== ${t('unplacedLabel')} ===`);
     for (const u of result.unplaced) {
-      lines.push(`  ${u.cargoId}: ${u.count}`);
+      lines.push(`  ${u.name ?? u.cargoId}: ${u.count}${fmtReasons(u)}`);
     }
   }
   downloadBlob(lines.join('\n'), `loading-plan-${tsForFilename()}.txt`, 'text/plain;charset=utf-8');
@@ -94,19 +104,19 @@ function csvCell(v) {
   return s;
 }
 
-export function exportCSV(result, containerSpec) {
+export function exportCSV(result, containerSpec, meta = {}) {
   if (!result?.containers?.length) {
     alert(t('addAtLeastOne'));
     return;
   }
   const rows = [];
-  rows.push(['seq', 'name', 'container', 'x_cm', 'y_cm', 'z_cm', 'L_cm', 'W_cm', 'H_cm', 'weight_kg', 'orientation']);
-  let seq = 1;
+  rows.push(['load_seq', 'name', 'container', 'x_cm', 'y_cm', 'z_cm', 'L_cm', 'W_cm', 'H_cm', 'weight_kg', 'orientation']);
   for (let i = 0; i < result.containers.length; i++) {
     const ct = result.containers[i];
-    for (const p of ct.placements) {
+    const ordered = [...ct.placements].sort((a, b) => (a.loadSeq ?? 0) - (b.loadSeq ?? 0));
+    for (const p of ordered) {
       rows.push([
-        seq++,
+        p.loadSeq ?? '',
         p.name,
         `${i + 1}/${containerSpec.type}`,
         p.x.toFixed(1),
@@ -126,7 +136,7 @@ export function exportCSV(result, containerSpec) {
 }
 
 // ===== PDF (via print) =====
-export function exportPDF(result, containerSpec) {
+export function exportPDF(result, containerSpec, meta = {}) {
   if (!result?.containers?.length) {
     alert(t('addAtLeastOne'));
     return;
@@ -138,7 +148,7 @@ export function exportPDF(result, containerSpec) {
   }
 
   const totalItems = result.containers.reduce((s, c) => s + c.placements.length, 0);
-  const html = renderPrintHTML(result, containerSpec, totalItems);
+  const html = renderPrintHTML(result, containerSpec, totalItems, meta);
   win.document.open();
   win.document.write(html);
   win.document.close();
@@ -151,15 +161,32 @@ export function exportPDF(result, containerSpec) {
   };
 }
 
-function renderPrintHTML(result, containerSpec, totalItems) {
+function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 
   const containerSections = result.containers.map((ct, i) => {
-    const rows = ct.placements.map((p, n) => `
+    // Per-cargo summary table for this container
+    const summaryMap = new Map();
+    for (const p of ct.placements) {
+      const e = summaryMap.get(p.cargoId) ?? { name: p.name, color: p.color, count: 0, weightKg: 0 };
+      e.count++;
+      e.weightKg += p.weightKg ?? 0;
+      summaryMap.set(p.cargoId, e);
+    }
+    const summaryRows = Array.from(summaryMap.values()).map((e) => `
       <tr>
-        <td>${n + 1}</td>
+        <td><span class="sw" style="background:${esc(e.color || '#888')}"></span>${esc(e.name)}</td>
+        <td>${e.count}</td>
+        <td>${e.weightKg.toFixed(0)}</td>
+      </tr>
+    `).join('');
+
+    const ordered = [...ct.placements].sort((a, b) => (a.loadSeq ?? 0) - (b.loadSeq ?? 0));
+    const rows = ordered.map((p) => `
+      <tr>
+        <td>${p.loadSeq ?? ''}</td>
         <td><span class="sw" style="background:${esc(p.color || '#888')}"></span>${esc(p.name)}</td>
         <td>${p.x.toFixed(0)}</td>
         <td>${p.y.toFixed(0)}</td>
@@ -169,6 +196,9 @@ function renderPrintHTML(result, containerSpec, totalItems) {
         <td>${fmtRot(p)}</td>
       </tr>
     `).join('');
+    const lateral = ct.lateral && !ct.lateral.ok
+      ? `<div class="meta"><span class="warn">${t('lateralWarn')}</span> (${t('lateralOffset')} ${ct.lateral.offsetCm.toFixed(1)} cm)</div>`
+      : '';
     const cog = ct.cog
       ? `<div class="meta"><strong>${t('cog')}</strong>: X=${ct.cog.x.toFixed(1)} · Y=${ct.cog.y.toFixed(1)} · Z=${ct.cog.z.toFixed(1)} cm${ct.cog.hasWeight ? '' : ' (vol-weighted)'}</div>`
       : '';
@@ -184,11 +214,17 @@ function renderPrintHTML(result, containerSpec, totalItems) {
         <h2>${t('container')} ${i + 1} — ${esc(containerSpec.label)}</h2>
         <div class="meta"><strong>${t('placedLabel')}</strong>: ${ct.placements.length} · <strong>${t('volume')}</strong>: ${(ct.stats.volumeUtilization * 100).toFixed(1)}% · <strong>${t('weight')}</strong>: ${ct.stats.usedWeightKg.toFixed(0)}/${ct.stats.payloadKg} kg</div>
         ${cog}
+        ${lateral}
         ${axle}
+        <h3>${t('cargoSummary')}</h3>
+        <table class="summary">
+          <thead><tr><th>${t('name')}</th><th>${t('quantity')}</th><th>${t('weight')} (kg)</th></tr></thead>
+          <tbody>${summaryRows}</tbody>
+        </table>
         <table>
           <thead>
             <tr>
-              <th>${t('seq')}</th><th>${t('name')}</th>
+              <th>${t('loadSeqCol')}</th><th>${t('name')}</th>
               <th>X</th><th>Y</th><th>Z</th>
               <th>${t('actualDims')} (cm)</th>
               <th>${t('weight')} (kg)</th>
@@ -201,8 +237,16 @@ function renderPrintHTML(result, containerSpec, totalItems) {
     `;
   }).join('');
 
+  const reasonLine = (u) => {
+    const parts = Object.entries(u.reasons ?? {}).map(([r, n]) => `${t(REASON_KEYS[r] ?? r)}×${n}`);
+    return parts.length ? ` (${parts.join(', ')})` : '';
+  };
   const unplacedHtml = result.unplaced?.length
-    ? `<section><h2>${t('unplacedLabel')}</h2><ul>${result.unplaced.map(u => `<li>${esc(u.cargoId)}: ${u.count}</li>`).join('')}</ul></section>`
+    ? `<section><h2>${t('unplacedLabel')}</h2><ul>${result.unplaced.map(u => `<li>${esc(u.name ?? u.cargoId)}: ${u.count}${esc(reasonLine(u))}</li>`).join('')}</ul></section>`
+    : '';
+
+  const snapshotHtml = meta.snapshotDataUrl
+    ? `<section class="snapshot"><h2>${t('snapshot3d')}</h2><img src="${meta.snapshotDataUrl}" alt="3D snapshot"></section>`
     : '';
 
   return `<!DOCTYPE html>
@@ -224,16 +268,20 @@ function renderPrintHTML(result, containerSpec, totalItems) {
   .ok { color: #28a745; font-weight: 600; }
   .warn { color: #dc3545; font-weight: 600; }
   .container-block { page-break-inside: avoid; }
+  h3 { font-size: 0.95em; margin: 12px 0 2px; }
+  table.summary { width: auto; min-width: 50%; }
+  .snapshot img { max-width: 100%; border: 1px solid #ccc; border-radius: 4px; margin-top: 6px; }
   @media print { body { margin: 12mm; } }
 </style>
 </head>
 <body>
-  <h1>${t('printTitle')}</h1>
+  <h1>${esc(meta.title || t('printTitle'))}</h1>
   <div class="header-meta">
     ${t('generated')}: ${tsHuman()} ·
     ${t('totalContainers')}: ${result.containers.length} ·
     ${t('totalItems')}: ${totalItems}
   </div>
+  ${snapshotHtml}
   ${containerSections}
   ${unplacedHtml}
 </body>

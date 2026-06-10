@@ -1,9 +1,9 @@
 // Packer self-tests per SDD §8.4
 // Run: node tests/packer.test.js
 
-import { pack } from '../src/packer.js';
-import { getContainer } from '../src/containers.js';
-import { computeCOG, computeAxleLoads, enrichResult } from '../src/analytics.js';
+import { pack, packAuto } from '../src/packer.js';
+import { getContainer, getAllContainers } from '../src/containers.js';
+import { computeCOG, computeAxleLoads, computeLateralBalance, enrichResult } from '../src/analytics.js';
 
 let passed = 0;
 let failed = 0;
@@ -220,6 +220,152 @@ console.log('T8: enrichResult 整合');
     assert(ct.axleLoads && typeof ct.axleLoads.frontKg === 'number', 'T8: truck container should have axleLoads');
   }
   console.log(`  → ${result.containers.length} 個貨櫃皆已附加 COG 與軸載`);
+}
+
+// ===== T9: Loading sequence (loadSeq) =====
+console.log('T9: 裝載順序 loadSeq');
+{
+  const cargo = [{
+    id: 'S', name: 'Seq', length: 100, width: 100, height: 100,
+    weightKg: 10, quantity: 150, color: '#0ff',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8,
+  }];
+  const c = getContainer('OCEAN_20GP');
+  const result = pack(cargo, c);
+  const all = result.containers.flatMap(ct => ct.placements);
+  const seqs = all.map(p => p.loadSeq).sort((a, b) => a - b);
+  assert(seqs.length > 0 && seqs[0] === 1 && seqs[seqs.length - 1] === all.length,
+    `T9: loadSeq should be 1..${all.length}, got ${seqs[0]}..${seqs[seqs.length - 1]}`);
+  assert(new Set(seqs).size === all.length, 'T9: loadSeq must be unique');
+  // Within each container, physical load order goes back (low x) to door (high x)
+  for (const ct of result.containers) {
+    const ordered = [...ct.placements].sort((a, b) => a.loadSeq - b.loadSeq);
+    let prevX = -1;
+    let monotonic = true;
+    for (const p of ordered) {
+      if (p.x < prevX - 0.001) { monotonic = false; break; }
+      prevX = p.x;
+    }
+    assert(monotonic, 'T9: load order must be non-decreasing in x (back → door)');
+  }
+  console.log(`  → ${all.length} 箱已編裝載序 1..${all.length}`);
+}
+
+// ===== T10: Unplaced reasons =====
+console.log('T10: 未裝載原因');
+{
+  const cargo = [
+    { id: 'TOOBIG', name: 'TooBig', length: 700, width: 300, height: 300,
+      weightKg: 10, quantity: 2, color: '#f00',
+      rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+      maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8 },
+    { id: 'TOOHEAVY', name: 'TooHeavy', length: 100, width: 100, height: 100,
+      weightKg: 99999, quantity: 1, color: '#00f',
+      rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+      maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8 },
+  ];
+  const c = getContainer('OCEAN_20GP');
+  const result = pack(cargo, c);
+  const big = result.unplaced.find(u => u.cargoId === 'TOOBIG');
+  const heavy = result.unplaced.find(u => u.cargoId === 'TOOHEAVY');
+  assert(big && big.count === 2, 'T10: oversize cargo should be unplaced');
+  assert(big && big.reasons.oversize === 2, `T10: reason should be oversize, got ${JSON.stringify(big?.reasons)}`);
+  assert(heavy && heavy.reasons.overweight === 1, `T10: reason should be overweight, got ${JSON.stringify(heavy?.reasons)}`);
+  assert(big.name === 'TooBig', 'T10: unplaced entry should carry cargo name');
+  console.log(`  → oversize×${big.reasons.oversize}, overweight×${heavy.reasons.overweight}`);
+}
+
+// ===== T11: Auto container selection =====
+console.log('T11: 自動選櫃 packAuto');
+{
+  const cargo = [{
+    id: 'A', name: 'Auto', length: 100, width: 100, height: 100,
+    weightKg: 10, quantity: 10, color: '#0f0',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8,
+  }];
+  const best = packAuto(cargo, getAllContainers());
+  assert(best !== null, 'T11: packAuto should return a result');
+  const unplaced = best.result.unplaced.reduce((s, u) => s + u.count, 0);
+  assert(unplaced === 0, `T11: small load should fully fit, ${unplaced} unplaced`);
+  assert(best.result.containers.length === 1, `T11: should need 1 container, got ${best.result.containers.length}`);
+  // Best = highest utilization among 1-container solutions = smallest viable container
+  const chosenVol = best.containerSpec.internal.length * best.containerSpec.internal.width * best.containerSpec.internal.height;
+  for (const spec of getAllContainers()) {
+    const r = pack(cargo, spec);
+    const u = r.unplaced.reduce((s, x) => s + x.count, 0);
+    if (u === 0 && r.containers.length === 1) {
+      const v = spec.internal.length * spec.internal.width * spec.internal.height;
+      assert(chosenVol <= v + 0.001, `T11: chose ${best.containerSpec.id} (vol ${chosenVol}) but ${spec.id} (vol ${v}) is smaller`);
+    }
+  }
+  console.log(`  → 自動選擇 ${best.containerSpec.id}`);
+}
+
+// ===== T12: groupSameSku spatial clustering =====
+console.log('T12: 同 SKU 聚集 groupSameSku');
+{
+  const mk = (group) => ([
+    { id: 'A', name: 'GroupA', length: 100, width: 100, height: 100,
+      weightKg: 10, quantity: 8, color: '#f00', groupSameSku: group,
+      rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+      maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8 },
+    { id: 'B', name: 'GroupB', length: 100, width: 100, height: 100,
+      weightKg: 10, quantity: 8, color: '#00f', groupSameSku: false,
+      rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+      maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8 },
+  ]);
+  const c = getContainer('OCEAN_40HQ');
+  const spread = (placements, cargoId) => {
+    const pts = placements.filter(p => p.cargoId === cargoId)
+      .map(p => [p.x + p.L / 2, p.y + p.W / 2, p.z + p.H / 2]);
+    let sum = 0, n = 0;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        sum += Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1], pts[i][2] - pts[j][2]);
+        n++;
+      }
+    }
+    return n ? sum / n : 0;
+  };
+  const withGroup = pack(mk(true), c).containers[0].placements;
+  const withoutGroup = pack(mk(false), c).containers[0].placements;
+  assert(checkNoOverlap(withGroup) === null, 'T12: overlap with groupSameSku');
+  assert(checkInBounds(withGroup, c) === null, 'T12: out of bounds with groupSameSku');
+  const sWith = spread(withGroup, 'A');
+  const sWithout = spread(withoutGroup, 'A');
+  assert(sWith <= sWithout + 0.001, `T12: grouped spread ${sWith.toFixed(1)} should be ≤ ungrouped ${sWithout.toFixed(1)}`);
+  console.log(`  → A 平均距離：聚集 ${sWith.toFixed(0)}cm vs 未聚集 ${sWithout.toFixed(0)}cm`);
+}
+
+// ===== T13: Lateral (left/right) balance =====
+console.log('T13: 左右橫向平衡');
+{
+  const c = getContainer('OCEAN_40HQ');
+  const W = c.internal.width; // 235
+  const centered = computeLateralBalance({ x: 100, y: W / 2, z: 50, totalWeightKg: 1000 }, c);
+  assert(centered !== null && centered.ok, 'T13: centered COG should be ok');
+  assert(centered.side === 'center', `T13: side should be center, got ${centered?.side}`);
+  const offset = computeLateralBalance({ x: 100, y: W * 0.8, z: 50, totalWeightKg: 1000 }, c);
+  assert(offset !== null && !offset.ok, 'T13: 30% offset should be flagged');
+  assert(offset.side === 'right', `T13: side should be right, got ${offset?.side}`);
+  const zero = computeLateralBalance({ x: 0, y: 0, z: 0, totalWeightKg: 0 }, c);
+  assert(zero === null, 'T13: zero weight returns null');
+  console.log(`  → 中心 ok=${centered.ok}，偏移 ${offset.offsetCm.toFixed(0)}cm → ${offset.side} 警示`);
+}
+
+// ===== T14: i18n key parity =====
+console.log('T14: i18n 鍵一致性');
+{
+  const { dictionaries } = await import('../src/i18n.js');
+  const zh = Object.keys(dictionaries['zh-Hant']).sort();
+  const en = Object.keys(dictionaries['en']).sort();
+  const missingInEn = zh.filter(k => !en.includes(k));
+  const missingInZh = en.filter(k => !zh.includes(k));
+  assert(missingInEn.length === 0, `T14: keys missing in en: ${missingInEn.join(', ')}`);
+  assert(missingInZh.length === 0, `T14: keys missing in zh-Hant: ${missingInZh.join(', ')}`);
+  console.log(`  → zh-Hant ${zh.length} 鍵 = en ${en.length} 鍵`);
 }
 
 // ===== Summary =====

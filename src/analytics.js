@@ -112,14 +112,35 @@ export function computeAxleLoads(cog, containerSpec) {
 }
 
 /**
- * Augment each container in a pack result with its COG and axle loads.
- * Mutates and returns the same result object for convenience.
+ * Lateral (left/right) balance from the COG's offset along the container width.
+ * Important for ocean containers (lashing) and trucks (rollover risk).
+ * Offset is measured from the width centerline; >8% of width is flagged.
+ *
+ * @returns {Object|null} { offsetCm, offsetPct, side: 'left'|'right'|'center', ok }
+ */
+export function computeLateralBalance(cog, containerSpec) {
+  if (!cog || !containerSpec || cog.totalWeightKg <= 0) return null;
+  const W = containerSpec.internal.width;
+  const offsetCm = cog.y - W / 2;
+  const offsetPct = Math.abs(offsetCm) / W;
+  return {
+    offsetCm,
+    offsetPct,
+    side: Math.abs(offsetCm) < W * 0.01 ? 'center' : (offsetCm < 0 ? 'left' : 'right'),
+    ok: offsetPct <= 0.08,
+  };
+}
+
+/**
+ * Augment each container in a pack result with its COG, axle loads,
+ * and lateral balance. Mutates and returns the same result object.
  */
 export function enrichResult(result, containerSpec) {
   if (!result?.containers) return result;
   for (const ct of result.containers) {
     ct.cog = computeCOG(ct.placements);
     ct.axleLoads = computeAxleLoads(ct.cog, containerSpec);
+    ct.lateral = computeLateralBalance(ct.cog, containerSpec);
   }
   return result;
 }

@@ -1,6 +1,9 @@
 // Three.js scene management — per SDD §7
-import * as THREE from 'https://esm.sh/three@0.160.0';
-import { OrbitControls } from 'https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+// three.js is vendored (vendor/) so the app works fully offline. OrbitControls
+// is patched to import the vendored build directly — no import map needed,
+// which keeps Safari 15 (NFR-2) working.
+import * as THREE from '../vendor/three.module.min.js';
+import { OrbitControls } from '../vendor/OrbitControls.js';
 
 let scene, camera, renderer, controls;
 let groundGroup;          // floor + grid (resized per render)
@@ -12,6 +15,9 @@ let opacity = 1.0;
 let labelsVisible = true;
 let cogVisible = true;
 let highlightMesh = null;
+let stepLimit = null;                 // null = show all; N = show loadSeq ≤ N
+const hiddenCargoIds = new Set();     // cargo types toggled off in the UI
+let totalSteps = 0;
 
 const GAP_BETWEEN_CONTAINERS = 200; // cm, in world units
 
@@ -78,8 +84,8 @@ function onCanvasClick(event) {
   ndc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   ndc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(ndc, camera);
-  const hits = raycaster.intersectObjects(boxesGroup.children, false);
-  const hit = hits.find((h) => h.object.isMesh && h.object.userData.placement);
+  const hits = raycaster.intersectObjects(boxesGroup.children, true);
+  const hit = hits.find((h) => h.object.isMesh && h.object.userData.placement && h.object.parent?.visible !== false);
   if (hit) {
     setHighlight(hit.object);
     boxClickListeners.forEach((fn) => fn(hit.object.userData.placement));
@@ -123,8 +129,11 @@ function animate() {
  */
 export function renderResult(result, containerSpec) {
   clearAll();
+  stepLimit = null;
+  highlightMesh = null;
 
   const containers = result.containers ?? [];
+  totalSteps = containers.reduce((s, ct) => s + ct.placements.length, 0);
   const count = Math.max(containers.length, 1);
   const totalLen = count * containerSpec.internal.length + (count - 1) * GAP_BETWEEN_CONTAINERS;
   const maxW = containerSpec.internal.width;
@@ -377,14 +386,66 @@ function drawBox(p, offsetX) {
   const outline = new THREE.LineSegments(edges, edgeMat);
   outline.position.copy(mesh.position);
 
-  boxesGroup.add(mesh);
-  boxesGroup.add(outline);
+  // Wrap mesh + outline so visibility (cargo toggle / step playback) stays in sync
+  const boxGroup = new THREE.Group();
+  boxGroup.add(mesh);
+  boxGroup.add(outline);
+  boxGroup.userData.cargoId = p.cargoId;
+  boxGroup.userData.loadSeq = p.loadSeq ?? 0;
+  boxGroup.visible = computeBoxVisibility(p.cargoId, p.loadSeq ?? 0);
+  boxesGroup.add(boxGroup);
+}
+
+function computeBoxVisibility(cargoId, loadSeq) {
+  if (hiddenCargoIds.has(cargoId)) return false;
+  if (stepLimit !== null && loadSeq > stepLimit) return false;
+  return true;
+}
+
+function applyBoxVisibility() {
+  for (const g of boxesGroup.children) {
+    if (!g.isGroup) continue;
+    g.visible = computeBoxVisibility(g.userData.cargoId, g.userData.loadSeq);
+  }
+}
+
+/** Hide/show all boxes belonging to a cargo type. */
+export function setCargoVisibility(cargoId, visible) {
+  if (visible) hiddenCargoIds.delete(cargoId);
+  else hiddenCargoIds.add(cargoId);
+  applyBoxVisibility();
+}
+
+/** Loading-sequence playback: show only boxes with loadSeq ≤ n (null = all). */
+export function setStepLimit(n) {
+  stepLimit = (n === null || n === undefined) ? null : Math.max(0, Math.floor(n));
+  applyBoxVisibility();
+}
+
+export function getTotalSteps() {
+  return totalSteps;
+}
+
+/** Capture the current 3D view as a PNG data URL. */
+export function captureImage() {
+  renderer.render(scene, camera);
+  return renderer.domElement.toDataURL('image/png');
+}
+
+function* iterateBoxObjects() {
+  for (const child of boxesGroup.children) {
+    if (child.isGroup) {
+      yield* child.children;
+    } else {
+      yield child;
+    }
+  }
 }
 
 export function setLabelsVisible(v) {
   labelsVisible = !!v;
   // Re-create textures or strip them on existing materials
-  for (const mesh of boxesGroup.children) {
+  for (const mesh of iterateBoxObjects()) {
     if (!mesh.isMesh || !mesh.userData.placement) continue;
     const p = mesh.userData.placement;
     const baseColor = p.color || '#3498db';
@@ -553,7 +614,7 @@ function frameCamera(spec, containerCount) {
 
 export function setOpacity(v) {
   opacity = Math.max(0.1, Math.min(1, v));
-  for (const obj of boxesGroup.children) {
+  for (const obj of iterateBoxObjects()) {
     if (obj.material) {
       if (Array.isArray(obj.material)) {
         for (const m of obj.material) {
