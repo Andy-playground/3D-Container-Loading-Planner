@@ -97,6 +97,10 @@ function start() {
     setCargoVisibility(cargoId, visible);
   });
 
+  ui.on('unitsChanged', () => {
+    if (lastResult) ui.renderStats(lastResult, lastContainerSpec, lastMeta);
+  });
+
   onBoxClick((placement) => ui.showDetails(placement));
 
   document.getElementById('demoBtn')?.addEventListener('click', () => {

@@ -368,6 +368,28 @@ console.log('T14: i18n 鍵一致性');
   console.log(`  → zh-Hant ${zh.length} 鍵 = en ${en.length} 鍵`);
 }
 
+// ===== T15: Unit system conversion =====
+console.log('T15: 公英制單位轉換');
+{
+  const u = await import('../src/units.js');
+  u.setUnitSystem('metric');
+  assert(u.cmToDisplay(254) === 254, 'T15: metric passthrough');
+  assert(u.lenUnit() === 'cm' && u.wtUnit() === 'kg', 'T15: metric labels');
+  u.setUnitSystem('imperial');
+  assert(Math.abs(u.cmToDisplay(254) - 100) < 1e-9, `T15: 254cm should be 100in, got ${u.cmToDisplay(254)}`);
+  assert(Math.abs(u.displayToCm(100) - 254) < 1e-9, 'T15: 100in should be 254cm');
+  assert(Math.abs(u.kgToDisplay(45.359237) - 100) < 1e-9, `T15: 45.36kg should be 100lb, got ${u.kgToDisplay(45.359237)}`);
+  assert(Math.abs(u.displayToKg(100) - 45.359237) < 1e-9, 'T15: 100lb should be 45.36kg');
+  assert(u.lenUnit() === 'in' && u.wtUnit() === 'lb', 'T15: imperial labels');
+  // round-trip stability
+  const rt = u.displayToCm(u.cmToDisplay(123.45));
+  assert(Math.abs(rt - 123.45) < 1e-9, `T15: round-trip drift ${rt}`);
+  assert(u.fmtWt(Infinity) === '∞', 'T15: Infinity weight formats as ∞');
+  u.setUnitSystem('metric');
+  assert(u.fmtLen(100.5) === '100.5' && u.fmtLen(100.0) === '100', 'T15: trailing zero trim');
+  console.log('  → cm↔in、kg↔lb、round-trip、∞ 格式皆正確');
+}
+
 // ===== Summary =====
 console.log('\n========================');
 console.log(`通過: ${passed}, 失敗: ${failed}`);

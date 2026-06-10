@@ -3,6 +3,7 @@
 // CJK text and colors render correctly without bundling a CJK font.
 
 import { t, getLang } from './i18n.js';
+import { lenUnit, wtUnit, fmtLen, fmtWt } from './units.js';
 
 function tsForFilename() {
   const d = new Date();
@@ -66,25 +67,25 @@ export function exportTXT(result, containerSpec, meta = {}) {
     lines.push(`=== ${t('container')} ${i + 1} (${containerSpec.type}) ===`);
     lines.push(`${t('placedLabel')}: ${ct.placements.length} ${t('boxes')}`);
     lines.push(`${t('volume')}: ${(ct.stats.volumeUtilization * 100).toFixed(1)}%`);
-    lines.push(`${t('weight')}: ${ct.stats.usedWeightKg.toFixed(0)}/${ct.stats.payloadKg} kg`);
+    lines.push(`${t('weight')}: ${fmtWt(ct.stats.usedWeightKg, 0)}/${fmtWt(ct.stats.payloadKg, 0)} ${wtUnit()}`);
     if (ct.cog) {
-      lines.push(`${t('cog')} (cm): X=${ct.cog.x.toFixed(1)} Y=${ct.cog.y.toFixed(1)} Z=${ct.cog.z.toFixed(1)}${ct.cog.hasWeight ? '' : ' (volume-weighted)'}`);
+      lines.push(`${t('cog')} (${lenUnit()}): X=${fmtLen(ct.cog.x)} Y=${fmtLen(ct.cog.y)} Z=${fmtLen(ct.cog.z)}${ct.cog.hasWeight ? '' : ' (volume-weighted)'}`);
     }
     if (ct.axleLoads) {
       const a = ct.axleLoads;
-      lines.push(`${t('axleFront')}: ${a.frontKg.toFixed(0)} kg (${(a.frontPct * 100).toFixed(0)}%)  ${t('axleRear')}: ${a.rearKg.toFixed(0)} kg (${(a.rearPct * 100).toFixed(0)}%)  ${a.balanced ? t('balanced') : t('notBalanced')}`);
+      lines.push(`${t('axleFront')}: ${fmtWt(a.frontKg, 0)} ${wtUnit()} (${(a.frontPct * 100).toFixed(0)}%)  ${t('axleRear')}: ${fmtWt(a.rearKg, 0)} ${wtUnit()} (${(a.rearPct * 100).toFixed(0)}%)  ${a.balanced ? t('balanced') : t('notBalanced')}`);
     }
     if (ct.lateral && !ct.lateral.ok) {
-      lines.push(`${t('lateralWarn')}: ${t('lateralOffset')} ${ct.lateral.offsetCm.toFixed(1)} cm`);
+      lines.push(`${t('lateralWarn')}: ${t('lateralOffset')} ${fmtLen(ct.lateral.offsetCm)} ${lenUnit()}`);
     }
     lines.push('');
     // Items in physical loading order (back of container first)
     const ordered = [...ct.placements].sort((a, b) => (a.loadSeq ?? 0) - (b.loadSeq ?? 0));
     for (const p of ordered) {
       lines.push(`${p.loadSeq ?? '?'}. ${p.name}`);
-      lines.push(`   Position: X=${p.x.toFixed(0)}cm, Y=${p.y.toFixed(0)}cm, Z=${p.z.toFixed(0)}cm`);
-      lines.push(`   Dimensions: ${p.L}×${p.W}×${p.H}cm`);
-      lines.push(`   Weight: ${(p.weightKg ?? 0)}kg  Orientation: ${fmtRot(p)}`);
+      lines.push(`   Position: X=${fmtLen(p.x, 0)}${lenUnit()}, Y=${fmtLen(p.y, 0)}${lenUnit()}, Z=${fmtLen(p.z, 0)}${lenUnit()}`);
+      lines.push(`   Dimensions: ${fmtLen(p.L)}×${fmtLen(p.W)}×${fmtLen(p.H)}${lenUnit()}`);
+      lines.push(`   Weight: ${fmtWt(p.weightKg ?? 0)}${wtUnit()}  Orientation: ${fmtRot(p)}`);
     }
     lines.push('');
   }
@@ -179,7 +180,7 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
       <tr>
         <td><span class="sw" style="background:${esc(e.color || '#888')}"></span>${esc(e.name)}</td>
         <td>${e.count}</td>
-        <td>${e.weightKg.toFixed(0)}</td>
+        <td>${fmtWt(e.weightKg, 0)}</td>
       </tr>
     `).join('');
 
@@ -188,37 +189,37 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
       <tr>
         <td>${p.loadSeq ?? ''}</td>
         <td><span class="sw" style="background:${esc(p.color || '#888')}"></span>${esc(p.name)}</td>
-        <td>${p.x.toFixed(0)}</td>
-        <td>${p.y.toFixed(0)}</td>
-        <td>${p.z.toFixed(0)}</td>
-        <td>${p.L}×${p.W}×${p.H}</td>
-        <td>${p.weightKg ?? 0}</td>
+        <td>${fmtLen(p.x, 0)}</td>
+        <td>${fmtLen(p.y, 0)}</td>
+        <td>${fmtLen(p.z, 0)}</td>
+        <td>${fmtLen(p.L)}×${fmtLen(p.W)}×${fmtLen(p.H)}</td>
+        <td>${fmtWt(p.weightKg ?? 0)}</td>
         <td>${fmtRot(p)}</td>
       </tr>
     `).join('');
     const lateral = ct.lateral && !ct.lateral.ok
-      ? `<div class="meta"><span class="warn">${t('lateralWarn')}</span> (${t('lateralOffset')} ${ct.lateral.offsetCm.toFixed(1)} cm)</div>`
+      ? `<div class="meta"><span class="warn">${t('lateralWarn')}</span> (${t('lateralOffset')} ${fmtLen(ct.lateral.offsetCm)} ${lenUnit()})</div>`
       : '';
     const cog = ct.cog
-      ? `<div class="meta"><strong>${t('cog')}</strong>: X=${ct.cog.x.toFixed(1)} · Y=${ct.cog.y.toFixed(1)} · Z=${ct.cog.z.toFixed(1)} cm${ct.cog.hasWeight ? '' : ' (vol-weighted)'}</div>`
+      ? `<div class="meta"><strong>${t('cog')}</strong>: X=${fmtLen(ct.cog.x)} · Y=${fmtLen(ct.cog.y)} · Z=${fmtLen(ct.cog.z)} ${lenUnit()}${ct.cog.hasWeight ? '' : ' (vol-weighted)'}</div>`
       : '';
     const axle = ct.axleLoads
       ? `<div class="meta">
-          <strong>${t('axleFront')}</strong>: ${ct.axleLoads.frontKg.toFixed(0)} kg (${(ct.axleLoads.frontPct * 100).toFixed(0)}%) ·
-          <strong>${t('axleRear')}</strong>: ${ct.axleLoads.rearKg.toFixed(0)} kg (${(ct.axleLoads.rearPct * 100).toFixed(0)}%) ·
+          <strong>${t('axleFront')}</strong>: ${fmtWt(ct.axleLoads.frontKg, 0)} ${wtUnit()} (${(ct.axleLoads.frontPct * 100).toFixed(0)}%) ·
+          <strong>${t('axleRear')}</strong>: ${fmtWt(ct.axleLoads.rearKg, 0)} ${wtUnit()} (${(ct.axleLoads.rearPct * 100).toFixed(0)}%) ·
           ${ct.axleLoads.balanced ? `<span class="ok">${t('balanced')}</span>` : `<span class="warn">${t('notBalanced')}</span>`}
         </div>`
       : '';
     return `
       <section class="container-block">
         <h2>${t('container')} ${i + 1} — ${esc(containerSpec.label)}</h2>
-        <div class="meta"><strong>${t('placedLabel')}</strong>: ${ct.placements.length} · <strong>${t('volume')}</strong>: ${(ct.stats.volumeUtilization * 100).toFixed(1)}% · <strong>${t('weight')}</strong>: ${ct.stats.usedWeightKg.toFixed(0)}/${ct.stats.payloadKg} kg</div>
+        <div class="meta"><strong>${t('placedLabel')}</strong>: ${ct.placements.length} · <strong>${t('volume')}</strong>: ${(ct.stats.volumeUtilization * 100).toFixed(1)}% · <strong>${t('weight')}</strong>: ${fmtWt(ct.stats.usedWeightKg, 0)}/${fmtWt(ct.stats.payloadKg, 0)} ${wtUnit()}</div>
         ${cog}
         ${lateral}
         ${axle}
         <h3>${t('cargoSummary')}</h3>
         <table class="summary">
-          <thead><tr><th>${t('name')}</th><th>${t('quantity')}</th><th>${t('weight')} (kg)</th></tr></thead>
+          <thead><tr><th>${t('name')}</th><th>${t('quantity')}</th><th>${t('weight')} (${wtUnit()})</th></tr></thead>
           <tbody>${summaryRows}</tbody>
         </table>
         <table>
@@ -226,8 +227,8 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
             <tr>
               <th>${t('loadSeqCol')}</th><th>${t('name')}</th>
               <th>X</th><th>Y</th><th>Z</th>
-              <th>${t('actualDims')} (cm)</th>
-              <th>${t('weight')} (kg)</th>
+              <th>${t('actualDims')} (${lenUnit()})</th>
+              <th>${t('weight')} (${wtUnit()})</th>
               <th>${t('rotationLabel')}</th>
             </tr>
           </thead>

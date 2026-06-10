@@ -104,8 +104,21 @@ export function pack(cargoTypes, containerSpec, options = {}) {
  */
 export function packAuto(cargoTypes, containerSpecs, options = {}) {
   let best = null;
-  for (const spec of containerSpecs) {
-    const result = pack(cargoTypes, spec, options);
+  // Evaluate large containers first: they establish a low container-count
+  // baseline early, which makes the pruning cap below effective.
+  const ordered = [...containerSpecs].sort((a, b) =>
+    (b.internal.length * b.internal.width * b.internal.height) -
+    (a.internal.length * a.internal.width * a.internal.height)
+  );
+  for (const spec of ordered) {
+    const opts = { ...options };
+    // Prune: once a complete plan (0 unplaced) exists, a candidate needing
+    // more containers than best loses regardless — cap the search there and
+    // let the resulting unplaced count disqualify it cheaply.
+    if (best && best.unplacedCount === 0) {
+      opts.maxContainers = Math.min(opts.maxContainers ?? 20, best.containerCount);
+    }
+    const result = pack(cargoTypes, spec, opts);
     const unplacedCount = result.unplaced.reduce((s, u) => s + u.count, 0);
     const containerCount = result.containers.length;
     const avgUtil = containerCount

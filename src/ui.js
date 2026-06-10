@@ -4,6 +4,10 @@ import {
   addCustomContainer, removeCustomContainer,
 } from './containers.js';
 import { t } from './i18n.js';
+import {
+  initUnits, getUnitSystem, setUnitSystem, lenUnit, wtUnit,
+  cmToDisplay, displayToCm, kgToDisplay, displayToKg, fmtLen, fmtWt,
+} from './units.js';
 
 const STORAGE_KEY = 'clp:current';
 
@@ -36,6 +40,7 @@ const listeners = {
   labelsToggle: [],
   cogToggle: [],
   visibilityToggle: [],
+  unitsChanged: [],
 };
 
 export function on(event, fn) {
@@ -55,14 +60,76 @@ export function getHiddenCargoIds() {
 }
 
 export function init() {
+  initUnits();
   bindContainerSelect();
   bindCustomContainerForm();
   bindPresets();
   bindCargoForm();
   bindCsvImport();
   bindActions();
+  bindUnits();
   loadFromStorage();
   renderAll();
+}
+
+// ===== Unit system =====
+function bindUnits() {
+  const sel = document.getElementById('unitSelect');
+  if (!sel) return;
+  sel.value = getUnitSystem();
+  sel.addEventListener('change', () => {
+    if (sel.value === getUnitSystem()) return;
+    convertOpenFormValues(sel.value);
+    renderAll();
+    hideDetails(); // panel would show stale units
+    emit('unitsChanged');
+  });
+}
+
+// Re-express any numbers currently typed into the cargo / custom-container
+// forms in the new unit system (via metric as the pivot).
+function convertOpenFormValues(newSystem) {
+  const lenIds = ['cargoL', 'cargoW', 'cargoH', 'ccL', 'ccW', 'ccH'];
+  const wtIds = ['cargoWeight', 'cargoMaxLoadTop', 'ccPayload'];
+  const metric = {};
+  for (const id of lenIds) {
+    const v = parseFloat(document.getElementById(id)?.value);
+    if (isFinite(v)) metric[id] = displayToCm(v);
+  }
+  for (const id of wtIds) {
+    const v = parseFloat(document.getElementById(id)?.value);
+    if (isFinite(v)) metric[id] = displayToKg(v);
+  }
+  setUnitSystem(newSystem);
+  for (const id of lenIds) {
+    if (id in metric) document.getElementById(id).value = round2(cmToDisplay(metric[id]));
+  }
+  for (const id of wtIds) {
+    if (id in metric) document.getElementById(id).value = round2(kgToDisplay(metric[id]));
+  }
+}
+
+function applyUnitLabels() {
+  const sel = document.getElementById('unitSelect');
+  if (sel && sel.options.length >= 2) {
+    sel.options[0].textContent = t('unitMetric');
+    sel.options[1].textContent = t('unitImperial');
+    sel.value = getUnitSystem();
+  }
+  const L = lenUnit(), W = wtUnit();
+  const set = (forId, key, unit) => {
+    const el = document.querySelector(`label[for=${forId}]`);
+    if (el) el.textContent = `${t(key)} (${unit})`;
+  };
+  set('cargoL', 'lengthCm', L);
+  set('cargoW', 'widthCm', L);
+  set('cargoH', 'heightCm', L);
+  set('cargoWeight', 'weightKg', W);
+  set('cargoMaxLoadTop', 'maxLoadOnTopKg', W);
+  set('ccL', 'lengthCm', L);
+  set('ccW', 'widthCm', L);
+  set('ccH', 'heightCm', L);
+  set('ccPayload', 'payloadKgLabel', W);
 }
 
 // ===== Container selection =====
@@ -123,10 +190,10 @@ function bindCustomContainerForm() {
   });
   document.getElementById('ccSaveBtn')?.addEventListener('click', () => {
     const label = document.getElementById('ccName').value.trim() || `Custom ${getCustomContainers().length + 1}`;
-    const length = parseFloat(document.getElementById('ccL').value);
-    const width = parseFloat(document.getElementById('ccW').value);
-    const height = parseFloat(document.getElementById('ccH').value);
-    const payloadKg = parseFloat(document.getElementById('ccPayload').value);
+    const length = displayToCm(parseFloat(document.getElementById('ccL').value));
+    const width = displayToCm(parseFloat(document.getElementById('ccW').value));
+    const height = displayToCm(parseFloat(document.getElementById('ccH').value));
+    const payloadKg = displayToKg(parseFloat(document.getElementById('ccPayload').value));
     if (![length, width, height, payloadKg].every((v) => isFinite(v) && v > 0)) {
       alert(t('invalidContainerInput'));
       return;
@@ -162,10 +229,10 @@ function bindPresets() {
     const p = PRESETS.find((x) => x.key === sel.value);
     if (!p) return;
     document.getElementById('cargoName').value = p.name;
-    document.getElementById('cargoL').value = p.length;
-    document.getElementById('cargoW').value = p.width;
-    document.getElementById('cargoH').value = p.height;
-    document.getElementById('cargoWeight').value = p.weightKg;
+    document.getElementById('cargoL').value = round2(cmToDisplay(p.length));
+    document.getElementById('cargoW').value = round2(cmToDisplay(p.width));
+    document.getElementById('cargoH').value = round2(cmToDisplay(p.height));
+    document.getElementById('cargoWeight').value = round2(kgToDisplay(p.weightKg));
     sel.value = '';
   });
 }
@@ -181,7 +248,7 @@ function renderPresets() {
   for (const p of PRESETS) {
     const opt = document.createElement('option');
     opt.value = p.key;
-    opt.textContent = `${p.name} · ${p.length}×${p.width}×${p.height}cm`;
+    opt.textContent = `${p.name} · ${fmtLen(p.length)}×${fmtLen(p.width)}×${fmtLen(p.height)}${lenUnit()}`;
     sel.appendChild(opt);
   }
 }
@@ -200,14 +267,15 @@ function sanitizeColor(c, fallback = '#3498db') {
 
 function readCargoForm() {
   const name = document.getElementById('cargoName').value.trim() || `${t('name')} ${state.cargoTypes.length + 1}`;
-  const length = parseFloat(document.getElementById('cargoL').value);
-  const width = parseFloat(document.getElementById('cargoW').value);
-  const height = parseFloat(document.getElementById('cargoH').value);
-  const weightKg = Math.max(0, numOr(document.getElementById('cargoWeight').value, 0));
+  // Inputs are in the active display unit; storage is always cm/kg.
+  const length = displayToCm(parseFloat(document.getElementById('cargoL').value));
+  const width = displayToCm(parseFloat(document.getElementById('cargoW').value));
+  const height = displayToCm(parseFloat(document.getElementById('cargoH').value));
+  const weightKg = Math.max(0, displayToKg(numOr(document.getElementById('cargoWeight').value, 0)));
   const quantity = parseInt(document.getElementById('cargoQty').value);
   const color = sanitizeColor(document.getElementById('cargoColor').value);
   const maxStackLayers = Math.max(1, Math.round(numOr(document.getElementById('cargoMaxLayers').value, 99)));
-  const maxLoadOnTopKg = Math.max(0, numOr(document.getElementById('cargoMaxLoadTop').value, Infinity));
+  const maxLoadOnTopKg = Math.max(0, displayToKg(numOr(document.getElementById('cargoMaxLoadTop').value, Infinity)));
   const supportRatioMin = Math.min(1, Math.max(0, numOr(document.getElementById('cargoSupportRatio').value, 80) / 100));
   const allowYaw = document.getElementById('cargoYaw').checked;
   const allowPitch = document.getElementById('cargoPitch').checked;
@@ -232,16 +300,18 @@ function readCargoForm() {
   };
 }
 
+const round2 = (v) => Math.round(v * 100) / 100;
+
 function fillCargoForm(c) {
   document.getElementById('cargoName').value = c.name;
-  document.getElementById('cargoL').value = c.length;
-  document.getElementById('cargoW').value = c.width;
-  document.getElementById('cargoH').value = c.height;
-  document.getElementById('cargoWeight').value = c.weightKg;
+  document.getElementById('cargoL').value = round2(cmToDisplay(c.length));
+  document.getElementById('cargoW').value = round2(cmToDisplay(c.width));
+  document.getElementById('cargoH').value = round2(cmToDisplay(c.height));
+  document.getElementById('cargoWeight').value = round2(kgToDisplay(c.weightKg));
   document.getElementById('cargoQty').value = c.quantity;
   document.getElementById('cargoColor').value = c.color;
   document.getElementById('cargoMaxLayers').value = c.maxStackLayers === 99 ? 99 : c.maxStackLayers;
-  document.getElementById('cargoMaxLoadTop').value = c.maxLoadOnTopKg === Infinity ? '' : c.maxLoadOnTopKg;
+  document.getElementById('cargoMaxLoadTop').value = c.maxLoadOnTopKg === Infinity ? '' : round2(kgToDisplay(c.maxLoadOnTopKg));
   document.getElementById('cargoSupportRatio').value = Math.round((c.supportRatioMin ?? 0.8) * 100);
   document.getElementById('cargoYaw').checked = !!c.rotatable?.yaw;
   document.getElementById('cargoPitch').checked = !!c.rotatable?.pitch;
@@ -450,11 +520,11 @@ export function showDetails(p) {
     <div class="d-row"><span>${t('name')}</span><strong>${escapeHtml(p.name)}</strong></div>
     <div class="d-row"><span>${t('container')}</span>${p.containerNum}</div>
     <div class="d-row"><span>${t('loadSeqCol')}</span>#${p.loadSeq ?? '—'}</div>
-    <div class="d-row"><span>${t('pos')}</span>X=${p.x.toFixed(0)} · Y=${p.y.toFixed(0)} · Z=${p.z.toFixed(0)} cm</div>
-    <div class="d-row"><span>${t('actualDims')}</span>${p.L}×${p.W}×${p.H} cm</div>
+    <div class="d-row"><span>${t('pos')}</span>X=${fmtLen(p.x, 0)} · Y=${fmtLen(p.y, 0)} · Z=${fmtLen(p.z, 0)} ${lenUnit()}</div>
+    <div class="d-row"><span>${t('actualDims')}</span>${fmtLen(p.L)}×${fmtLen(p.W)}×${fmtLen(p.H)} ${lenUnit()}</div>
     <div class="d-row"><span>${t('orientation')}</span>${rotLabel}</div>
-    <div class="d-row"><span>${t('weight')}</span>${p.weightKg ?? 0} kg</div>
-    <div class="d-row"><span>${t('topLoadLimit')}</span>${p.maxLoadOnTopKg === Infinity || p.maxLoadOnTopKg == null ? '∞' : p.maxLoadOnTopKg + ' kg'}</div>
+    <div class="d-row"><span>${t('weight')}</span>${fmtWt(p.weightKg ?? 0)} ${wtUnit()}</div>
+    <div class="d-row"><span>${t('topLoadLimit')}</span>${p.maxLoadOnTopKg === Infinity || p.maxLoadOnTopKg == null ? '∞' : fmtWt(p.maxLoadOnTopKg) + ' ' + wtUnit()}</div>
     <div class="d-row"><span>${t('constraints')}</span>${p.thisSideUp ? '↑' : ''} ${p.nonStackable ? '⊘' : ''}</div>
   `;
   panel.style.display = 'block';
@@ -470,6 +540,7 @@ export function renderAll() {
   renderContainerInfo();
   renderPresets();
   renderCargoList();
+  applyUnitLabels();
   setEditMode(editingId);
   const titleInput = document.getElementById('planTitle');
   if (titleInput) {
@@ -498,8 +569,8 @@ function renderContainerInfo() {
   const c = getContainer(state.containerId);
   if (c) {
     info.innerHTML = `
-      <div>${c.internal.length} × ${c.internal.width} × ${c.internal.height} cm</div>
-      <div>≤ ${c.payloadKg.toLocaleString()} kg</div>
+      <div>${fmtLen(c.internal.length)} × ${fmtLen(c.internal.width)} × ${fmtLen(c.internal.height)} ${lenUnit()}</div>
+      <div>≤ ${Number(fmtWt(c.payloadKg, 0)).toLocaleString()} ${wtUnit()}</div>
     `;
   }
   if (delBtn) delBtn.style.display = c?.mode === 'custom' ? 'block' : 'none';
@@ -529,8 +600,8 @@ function renderCargoList() {
       <div class="swatch" style="background:${c.color}"></div>
       <div class="cargo-info">
         <div class="cargo-name">${escapeHtml(c.name)} <span class="qty">×${c.quantity}</span> ${priorityBadge}</div>
-        <div class="cargo-meta">${c.length}×${c.width}×${c.height}cm · ${c.weightKg}kg</div>
-        <div class="cargo-meta">≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · top≤${c.maxLoadOnTopKg === Infinity ? '∞' : c.maxLoadOnTopKg}kg · ${rotAxes.join('') || '—'}${c.thisSideUp ? ' ·↑' : ''}${c.groupSameSku ? ' ·▦' : ''}</div>
+        <div class="cargo-meta">${fmtLen(c.length)}×${fmtLen(c.width)}×${fmtLen(c.height)}${lenUnit()} · ${fmtWt(c.weightKg)}${wtUnit()}</div>
+        <div class="cargo-meta">≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · top≤${fmtWt(c.maxLoadOnTopKg)}${c.maxLoadOnTopKg === Infinity ? '' : wtUnit()} · ${rotAxes.join('') || '—'}${c.thisSideUp ? ' ·↑' : ''}${c.groupSameSku ? ' ·▦' : ''}</div>
       </div>
       <div class="row-actions">
         <button class="icon-btn eye-btn" data-id="${c.id}" title="${t('hideTitle')}">${hidden ? '🙈' : '👁'}</button>
@@ -608,18 +679,18 @@ export function renderStats(result, containerSpec, meta = {}) {
   html += `<div><strong>${t('containersNeeded')}</strong>: ${containerLabel}</div>`;
   for (let i = 0; i < containers.length; i++) {
     const ct = containers[i];
-    let line = `${t('container')} ${i + 1}: ${ct.placements.length} · ${t('volume')} ${(ct.stats.volumeUtilization * 100).toFixed(1)}% · ${ct.stats.usedWeightKg.toFixed(0)}/${ct.stats.payloadKg}kg`;
+    let line = `${t('container')} ${i + 1}: ${ct.placements.length} · ${t('volume')} ${(ct.stats.volumeUtilization * 100).toFixed(1)}% · ${fmtWt(ct.stats.usedWeightKg, 0)}/${fmtWt(ct.stats.payloadKg, 0)}${wtUnit()}`;
     if (ct.cog) {
-      line += ` · ${t('cog')} (${ct.cog.x.toFixed(0)}, ${ct.cog.y.toFixed(0)}, ${ct.cog.z.toFixed(0)})`;
+      line += ` · ${t('cog')} (${fmtLen(ct.cog.x, 0)}, ${fmtLen(ct.cog.y, 0)}, ${fmtLen(ct.cog.z, 0)})`;
     }
     html += `<div class="container-stat">${line}</div>`;
     if (ct.lateral && !ct.lateral.ok) {
-      html += `<div class="container-stat warn">↳ ${t('lateralWarn')} (${t('lateralOffset')} ${ct.lateral.offsetCm.toFixed(0)}cm)</div>`;
+      html += `<div class="container-stat warn">↳ ${t('lateralWarn')} (${t('lateralOffset')} ${fmtLen(ct.lateral.offsetCm, 0)}${lenUnit()})</div>`;
     }
     if (ct.axleLoads) {
       const a = ct.axleLoads;
       const cls = a.balanced ? 'ok' : 'warn';
-      html += `<div class="container-stat ${cls}">↳ ${t('axleFront')} ${a.frontKg.toFixed(0)}kg (${(a.frontPct * 100).toFixed(0)}%) · ${t('axleRear')} ${a.rearKg.toFixed(0)}kg (${(a.rearPct * 100).toFixed(0)}%) · ${a.balanced ? t('balanced') : t('notBalanced')}</div>`;
+      html += `<div class="container-stat ${cls}">↳ ${t('axleFront')} ${fmtWt(a.frontKg, 0)}${wtUnit()} (${(a.frontPct * 100).toFixed(0)}%) · ${t('axleRear')} ${fmtWt(a.rearKg, 0)}${wtUnit()} (${(a.rearPct * 100).toFixed(0)}%) · ${a.balanced ? t('balanced') : t('notBalanced')}</div>`;
     }
   }
   el.innerHTML = html;

@@ -81,6 +81,42 @@ v3.0 全部新功能 + 既有程式碼回歸檢查（src/*.js、index.html、ven
 - `node tests/packer.test.js` → 67 斷言全過
 
 ### 遺留事項（下輪檢視）
-- [ ] P2：`packAuto` 效能剪枝（接受中，觀察）
-- [ ] 公英制單位切換（商務 backlog）
+- [x] P2：`packAuto` 效能剪枝 → Iteration 3 完成
+- [x] 公英制單位切換 → Iteration 3 完成
 - [ ] 棧板化 FR-4（SDD 既定範圍）
+
+---
+
+## Iteration 3 — 2026-06-10（效能剪枝 + 公英制單位）
+
+### Production 視角
+
+| # | 項目 | 結果 | 處置 |
+|---|---|---|---|
+| P10 | `packAuto` 剪枝：大櫃先評估建立 baseline，已有零未裝載解後以 best 櫃數為 `maxContainers` 上限截斷 | ✅ 1000 箱 × 10 櫃型 **1661ms → 741ms（2.2×）**，選櫃結果不變（T11 驗證） | 已實作 |
+| P11 | 單位轉換不影響內部計算：儲存／packer／JSON／CSV 永遠公制，僅顯示/輸入層轉換 | ✅ 設計如此，避免累積誤差 | 記錄設計決策 |
+
+### Quality 視角
+
+| # | 項目 | 結果 | 處置 |
+|---|---|---|---|
+| Q11 | 公英制切換（cm/kg ↔ in/lb）：表單、清單、貨櫃資訊、統計、明細、TXT/PDF 報表全面跟隨；CSV 維持公制（資料交換格式，欄名 `_cm`/`_kg` 自述） | ✅ 新功能 | 已實作（`src/units.js`） |
+| Q12 | 切換單位時表單已輸入值就地換算（以公制為 pivot）、語言切換後單位後綴保留、設定持久化 | ✅ Chromium 驗證：100cm↔39.37in、10in 存為 25.4cm、重整保留 | 已驗證 |
+| Q13 | 初版漏 import `initUnits` → 啟動 ReferenceError（煙霧測試攔截） | 🔴 發現於測試 | **已修**；證明每輪必跑瀏覽器煙霧測試的價值 |
+| Q14 | T15 單位測試：cm↔in、kg↔lb、round-trip 漂移 < 1e-9、∞ 格式、尾零修剪 | ✅ 新增 10 斷言 | 已自動化 |
+
+### 本輪修正清單
+1. `packer.js`：`packAuto` 體積降序評估 + maxContainers 剪枝（P10）
+2. 新增 `src/units.js`：單位狀態、轉換、格式化（持久化 `clp:units`）
+3. `ui.js`／`index.html`：單位選擇器、9 個標籤動態後綴、輸入/顯示轉換、表單值就地換算
+4. `exporters.js`：TXT/PDF 跟隨顯示單位；CSV 維持公制
+5. `i18n.js`：標籤鍵去硬編碼單位 + 3 個新鍵
+6. `tests`：T15 單位轉換（10 斷言）
+
+### 驗證
+- `node tests/packer.test.js` → **77 斷言全過**
+- Chromium 煙霧 ×3（基本流程／auto-repack／單位系統）→ 全過、零 console error
+
+### 遺留事項（下輪檢視）
+- [ ] 棧板化 FR-4 完整實作（pallet 子貨物統計；目前以「棧板=一個 cargo」簡化處理）
+- [ ] 明細面板開啟時切換單位會被關閉（簡化處理）；可改為就地刷新

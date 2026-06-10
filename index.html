@@ -171,6 +171,13 @@
       <section>
         <h3 data-i18n="displayOptions">顯示選項</h3>
         <div class="field">
+          <label for="unitSelect" data-i18n="unitSystem">單位</label>
+          <select id="unitSelect">
+            <option value="metric">公制 (cm / kg)</option>
+            <option value="imperial">英制 (in / lb)</option>
+          </select>
+        </div>
+        <div class="field">
           <label for="opacitySlider" data-i18n="opacity">透明度</label>
           <input type="range" id="opacitySlider" min="20" max="100" value="100">
         </div>

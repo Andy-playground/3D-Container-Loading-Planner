@@ -28,6 +28,7 @@
 - ✅ **裝載順序播放器**：slider + 動畫逐箱重播裝載過程（v3.0）
 - ✅ 點擊箱子顯示明細（含裝載序）、變更貨櫃自動 re-pack
 - ✅ 透明度調節、COG 顯示開關、響應式 UI
+- ✅ **公英制單位切換（cm/kg ↔ in/lb）**，報表跟隨顯示單位（v3.1）
 
 ### 分析與報表
 - ✅ 重心 (COG) 計算 + 3D 標示
@@ -103,6 +104,7 @@ name, length_cm, width_cm, height_cm, weight_kg, quantity, color, max_stack_laye
 | 3 | v1.2 | 棧板化、填充規則、優先權、相同貨物聚集 | ✅ |
 | 4 | v2.0 | TXT/CSV/PDF 匯出、重心、軸載、i18n | ✅ |
 | 5 | v3.0 | 編輯/複製、自訂貨櫃、AUTO 選櫃、裝載順序播放、CSV 匯入、未裝載原因、橫向平衡、PNG/PDF 快照、離線化 | ✅ |
+| 6 | v3.1 | QA 循環：安全/正確性修補、packAuto 剪枝、公英制單位（詳見 QA_LOG.md） | ✅ |
 
 詳見 [SDD §11](./SDD.md#11-開發路線圖)。
 
