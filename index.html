@@ -153,6 +153,29 @@
           <input type="checkbox" id="cargoGroupSku">
           <label for="cargoGroupSku" data-i18n="groupSameSkuLabel">同類貨物聚集擺放</label>
         </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="cargoIsPallet">
+          <label for="cargoIsPallet" data-i18n="isPalletLabel">▤ 棧板（整板裝載，含子貨物清單）</label>
+        </div>
+        <div id="palletSection" style="display:none">
+          <div class="field-row">
+            <div class="field">
+              <label for="piName" data-i18n="subItemName">子貨物名稱</label>
+              <input type="text" id="piName">
+            </div>
+            <div class="field">
+              <label for="piQty" data-i18n="quantity">數量</label>
+              <input type="number" id="piQty" value="1" min="1">
+            </div>
+            <div class="field">
+              <label for="piWeight" data-i18n="subItemWeight">重量／件</label>
+              <input type="number" id="piWeight" value="0" min="0" step="0.1">
+            </div>
+          </div>
+          <button id="addSubItemBtn" class="mini-btn" data-i18n="addSubItem">+ 加入子貨物</button>
+          <div id="palletItemsList"></div>
+          <div id="palletWeightHint"></div>
+        </div>
         <button id="addCargoBtn" class="add-btn" data-i18n="addCargo">+ 加入貨物</button>
         <button id="cancelEditBtn" class="link-btn" style="display:none" data-i18n="cancelEdit">取消編輯</button>
         <div class="csv-row">

@@ -41,6 +41,19 @@ function fmtRot(p) {
 
 const REASON_KEYS = { oversize: 'reasonOversize', overweight: 'reasonOverweight', nospace: 'reasonNospace' };
 
+/** Unique pallet cargo types (name + contents) appearing in the plan. */
+function collectPalletTypes(result) {
+  const map = new Map();
+  for (const ct of result.containers ?? []) {
+    for (const p of ct.placements) {
+      if (p.isPallet && p.palletItems?.length && !map.has(p.cargoId)) {
+        map.set(p.cargoId, { name: p.name, items: p.palletItems });
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
 function fmtReasons(u) {
   const parts = Object.entries(u.reasons ?? {}).map(([r, n]) => `${t(REASON_KEYS[r] ?? r)}×${n}`);
   return parts.length ? ` (${parts.join(', ')})` : '';
@@ -60,6 +73,10 @@ export function exportTXT(result, containerSpec, meta = {}) {
   lines.push(`${t('totalContainers')}: ${result.containers.length}`);
   const totalItems = result.containers.reduce((s, c) => s + c.placements.length, 0);
   lines.push(`${t('totalItems')}: ${totalItems}`);
+  const palletTypes = collectPalletTypes(result);
+  for (const pt of palletTypes) {
+    lines.push(`${t('palletContents')} — ${pt.name}: ${pt.items.map((it) => `${it.name} ×${it.quantity} (${fmtWt(it.weightKg)}${wtUnit()})`).join(', ')}`);
+  }
   lines.push('');
 
   for (let i = 0; i < result.containers.length; i++) {
@@ -184,6 +201,12 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
       </tr>
     `).join('');
 
+    const palletNotes = Array.from(summaryMap.entries())
+      .map(([cargoId]) => ct.placements.find((p) => p.cargoId === cargoId))
+      .filter((p) => p?.isPallet && p.palletItems?.length)
+      .map((p) => `<div class="meta">▤ <strong>${esc(p.name)}</strong>: ${p.palletItems.map((it) => `${esc(it.name)} ×${it.quantity} (${fmtWt(it.weightKg)}${wtUnit()})`).join(' · ')}</div>`)
+      .join('');
+
     const ordered = [...ct.placements].sort((a, b) => (a.loadSeq ?? 0) - (b.loadSeq ?? 0));
     const rows = ordered.map((p) => `
       <tr>
@@ -222,6 +245,7 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
           <thead><tr><th>${t('name')}</th><th>${t('quantity')}</th><th>${t('weight')} (${wtUnit()})</th></tr></thead>
           <tbody>${summaryRows}</tbody>
         </table>
+        ${palletNotes}
         <table>
           <thead>
             <tr>

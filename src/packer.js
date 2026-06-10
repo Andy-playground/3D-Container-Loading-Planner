@@ -38,6 +38,9 @@ export function pack(cargoTypes, containerSpec, options = {}) {
         supportRatioMin: c.supportRatioMin ?? 0.8,
         priority: c.priority ?? 'normal',
         groupSameSku: c.groupSameSku ?? false,
+        // FR-4: pallet-as-unit — packed as one box; sub-items are statistical
+        isPallet: c.isPallet ?? false,
+        palletItems: c.palletItems ?? null,
       });
     }
   }
@@ -215,6 +218,8 @@ function packOneContainer(boxes, container, containerNum) {
             weightKg: box.weightKg,
             maxLoadOnTopKg: box.maxLoadOnTopKg,
             thisSideUp: box.thisSideUp,
+            isPallet: box.isPallet,
+            palletItems: box.palletItems,
             nonStackable: box.maxStackLayers <= 1 || box.maxLoadOnTopKg <= 0,
             yaw: orient.yaw,
             pitch: orient.pitch,

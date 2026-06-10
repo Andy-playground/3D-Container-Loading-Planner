@@ -118,5 +118,38 @@ v3.0 全部新功能 + 既有程式碼回歸檢查（src/*.js、index.html、ven
 - Chromium 煙霧 ×3（基本流程／auto-repack／單位系統）→ 全過、零 console error
 
 ### 遺留事項（下輪檢視）
-- [ ] 棧板化 FR-4 完整實作（pallet 子貨物統計；目前以「棧板=一個 cargo」簡化處理）
-- [ ] 明細面板開啟時切換單位會被關閉（簡化處理）；可改為就地刷新
+- [x] 棧板化 FR-4 完整實作 → Iteration 4 完成
+- [x] 明細面板單位就地刷新 → Iteration 4 完成
+
+---
+
+## Iteration 4 — 2026-06-10（棧板化 FR-4 + 明細就地刷新）→ 循環收斂
+
+### Quality 視角
+
+| # | 項目 | 結果 | 處置 |
+|---|---|---|---|
+| Q15 | 棧板化 FR-4.1 完整實作：`isPallet` + `palletItems[]`（名稱/數量/單件重），整板為一個裝載單位，子貨物僅統計用（符合 SDD §4.4） | ✅ 新功能 | 表單子貨物編輯器（含合計重量提示）、清單 ▤ 徽章、3D 明細內容物、TXT/PDF 報表棧板內容、JSON round-trip 消毒（`sanitizePalletItems`） |
+| Q16 | 明細面板開啟時切換單位 → 就地以新單位重繪（原為直接關閉）；語言切換亦同步刷新 | ✅ | `lastDetails` + `refreshDetails()` 併入 `renderAll()` |
+| Q17 | T16 棧板測試：10 板整板裝載、`maxStackLayers=1` 全數落地、`palletItems` 隨 placement 傳遞、無重疊 | ✅ 新增 5 斷言 | 已自動化 |
+
+### Production 視角
+
+| # | 項目 | 結果 | 處置 |
+|---|---|---|---|
+| P12 | 全套回歸（4 套 Chromium 煙霧：基本流程／auto-repack／單位系統／棧板）+ 82 斷言 | ✅ 全綠、零 console error | — |
+| P13 | 棧板瀏覽器流程：子貨物合計 252kg 提示、編輯回填、重整持久化、明細英制就地刷新 | ✅ | — |
+
+### 本輪修正清單
+1. `packer.js`：`isPallet`/`palletItems` 隨 box → placement 傳遞
+2. `ui.js`／`index.html`／`main.css`：棧板子貨物編輯器、徽章、明細內容物、`sanitizePalletItems`
+3. `ui.js`：`refreshDetails()` — 單位/語言切換時明細面板就地刷新
+4. `exporters.js`：TXT 計畫頭部 + PDF 每櫃彙總表下方列出棧板內容物
+5. `tests`：T16（5 斷言）
+
+### 驗證
+- `node tests/packer.test.js` → **82 斷言全過**
+- Chromium 煙霧 ×4 全綠、零 console error
+
+### 循環收斂聲明
+QA_LOG 遺留清單已全數結案；SDD §4 功能需求（FR-1～FR-5）除 2.3「旋轉步長 45°/15°」（P2，對軸對齊 bin-packing 無實質意義，標記為不做）外全部實作。後續若有新驗收要求，重新觸發 QA 循環即可。

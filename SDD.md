@@ -134,7 +134,7 @@ rotatable: {
 
 | ID | 功能 | 描述 | 優先級 | 現狀 |
 |---|---|---|---|---|
-| 4.1 | 棧板化（pallet as unit）| 一個棧板含多箱，整體裝載 | P2 | ❌ |
+| 4.1 | 棧板化（pallet as unit）| 一個棧板含多箱，整體裝載 | P2 | ✅ v3.1 |
 | 4.2 | 填充規則 | columnFill（整列）/ mixed（混裝）| P2 | ❌ |
 
 **4.1 規格**：
@@ -556,7 +556,13 @@ Total Items: 243
 - [x] M5-8: 左右橫向平衡檢查（COG 對寬度中線偏移 > 8% 警示）
 - [x] M5-9: 3D 截圖 PNG 匯出；PDF 報告內嵌 3D 快照 + 貨物彙總表
 - [x] M5-10: 計畫名稱、常用尺寸 preset（EUR/US 棧板、紙箱、油桶）
-- [x] M5-11: Three.js vendor 化（`vendor/` + import map），完全離線可用（NFR-4）
+- [x] M5-11: Three.js vendor 化（`vendor/`，OrbitControls patch 直接引用），完全離線可用（NFR-4）
+
+### Phase 6: QA 循環（v3.1）
+- [x] M6-1: 安全/正確性修補（0 值欄位、color 消毒、JSON 驗證；QA_LOG Iteration 1）
+- [x] M6-2: UX 一致性 — 貨物變更自動 re-pack（Iteration 2）
+- [x] M6-3: `packAuto` 剪枝 2.2×、公英制單位 cm/kg ↔ in/lb（Iteration 3）
+- [x] M6-4: 棧板化 FR-4.1 完整實作 + 明細就地刷新（Iteration 4）
 
 ### Future（無排程）
 - 危險品分隔規則（IMO/IMDG）

@@ -390,6 +390,31 @@ console.log('T15: 公英制單位轉換');
   console.log('  → cm↔in、kg↔lb、round-trip、∞ 格式皆正確');
 }
 
+// ===== T16: Pallet-as-unit (FR-4) =====
+console.log('T16: 棧板化 pallet-as-unit');
+{
+  const cargo = [{
+    id: 'PLT', name: 'EUR Pallet', length: 120, width: 80, height: 144,
+    weightKg: 320, quantity: 10, color: '#8b5a2b',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 1, maxLoadOnTopKg: 0, supportRatioMin: 0.8,
+    isPallet: true,
+    palletItems: [
+      { name: 'Carton X', quantity: 24, weightKg: 8 },
+      { name: 'Carton Y', quantity: 12, weightKg: 5 },
+    ],
+  }];
+  const c = getContainer('OCEAN_40HQ');
+  const result = pack(cargo, c);
+  const placements = result.containers.flatMap(ct => ct.placements);
+  assert(placements.length === 10, `T16: all 10 pallets should pack as units, got ${placements.length}`);
+  assert(placements.every(p => p.isPallet === true), 'T16: placements should carry isPallet');
+  assert(placements.every(p => p.palletItems?.length === 2), 'T16: placements should carry palletItems');
+  assert(placements.every(p => p.z < 0.01), 'T16: maxStackLayers=1 keeps pallets on floor');
+  assert(checkNoOverlap(placements) === null, 'T16: pallet overlap');
+  console.log(`  → 10 板全數整板裝載於底層，內容物清單隨 placement 傳遞`);
+}
+
 // ===== Summary =====
 console.log('\n========================');
 console.log(`通過: ${passed}, 失敗: ${failed}`);

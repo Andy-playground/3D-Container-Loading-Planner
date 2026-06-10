@@ -347,6 +347,28 @@ body {
 }
 .badge.urgent { background: #ffc107; color: #333; }
 .badge.lifo { background: #6f42c1; color: #fff; }
+.badge.pallet { background: #8b5a2b; color: #fff; }
+
+#palletSection {
+  margin: 6px 0 8px;
+  padding: 8px;
+  background: #fff;
+  border: 1px dashed #bbb;
+  border-radius: 4px;
+}
+#palletItemsList { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.pi-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 0.78em;
+}
+#palletWeightHint { font-size: 0.75em; color: #666; margin-top: 4px; }
 
 @media (max-width: 860px) {
   #main { flex-direction: column; }

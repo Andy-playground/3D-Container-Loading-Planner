@@ -65,11 +65,77 @@ export function init() {
   bindCustomContainerForm();
   bindPresets();
   bindCargoForm();
+  bindPalletEditor();
   bindCsvImport();
   bindActions();
   bindUnits();
   loadFromStorage();
   renderAll();
+}
+
+// ===== Pallet sub-items editor (FR-4) =====
+let formPalletItems = [];
+
+function bindPalletEditor() {
+  const chk = document.getElementById('cargoIsPallet');
+  const section = document.getElementById('palletSection');
+  if (!chk || !section) return;
+  chk.addEventListener('change', () => {
+    section.style.display = chk.checked ? 'block' : 'none';
+  });
+  document.getElementById('addSubItemBtn')?.addEventListener('click', () => {
+    const name = document.getElementById('piName').value.trim();
+    const quantity = parseInt(document.getElementById('piQty').value);
+    const weightKg = Math.max(0, displayToKg(numOr(document.getElementById('piWeight').value, 0)));
+    if (!name || !isFinite(quantity) || quantity <= 0) {
+      alert(t('inputValidPositive'));
+      return;
+    }
+    formPalletItems.push({ name, quantity, weightKg });
+    document.getElementById('piName').value = '';
+    renderPalletItems();
+  });
+}
+
+function renderPalletItems() {
+  const listEl = document.getElementById('palletItemsList');
+  const hint = document.getElementById('palletWeightHint');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  let totalKg = 0;
+  formPalletItems.forEach((it, idx) => {
+    totalKg += it.weightKg * it.quantity;
+    const row = document.createElement('div');
+    row.className = 'pi-row';
+    row.innerHTML = `
+      <span>${escapeHtml(it.name)} ×${it.quantity} · ${fmtWt(it.weightKg)}${wtUnit()}</span>
+      <button class="remove-btn" data-idx="${idx}">✕</button>
+    `;
+    listEl.appendChild(row);
+  });
+  listEl.querySelectorAll('.remove-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      formPalletItems.splice(parseInt(btn.dataset.idx), 1);
+      renderPalletItems();
+    });
+  });
+  if (hint) {
+    hint.textContent = formPalletItems.length
+      ? `${t('subItemsTotal')}: ${fmtWt(totalKg)} ${wtUnit()}`
+      : '';
+  }
+}
+
+function sanitizePalletItems(items) {
+  if (!Array.isArray(items)) return null;
+  const clean = items
+    .map((it) => ({
+      name: String(it?.name ?? '').slice(0, 100),
+      quantity: Math.max(1, Math.round(numOr(it?.quantity, 1))),
+      weightKg: Math.max(0, numOr(it?.weightKg, 0)),
+    }))
+    .filter((it) => it.name);
+  return clean.length ? clean : null;
 }
 
 // ===== Unit system =====
@@ -80,8 +146,7 @@ function bindUnits() {
   sel.addEventListener('change', () => {
     if (sel.value === getUnitSystem()) return;
     convertOpenFormValues(sel.value);
-    renderAll();
-    hideDetails(); // panel would show stale units
+    renderAll(); // includes refreshDetails → open panel re-renders in new units
     emit('unitsChanged');
   });
 }
@@ -282,6 +347,7 @@ function readCargoForm() {
   const allowRoll = document.getElementById('cargoRoll').checked;
   const thisSideUp = document.getElementById('cargoThisSideUp').checked;
   const groupSameSku = document.getElementById('cargoGroupSku')?.checked ?? false;
+  const isPallet = document.getElementById('cargoIsPallet')?.checked ?? false;
   const priority = document.getElementById('cargoPriority').value;
 
   if (!isFinite(length) || !isFinite(width) || !isFinite(height) || !isFinite(quantity) ||
@@ -296,6 +362,8 @@ function readCargoForm() {
     thisSideUp,
     maxStackLayers, maxLoadOnTopKg, supportRatioMin,
     groupSameSku,
+    isPallet,
+    palletItems: isPallet ? sanitizePalletItems(formPalletItems) : null,
     priority,
   };
 }
@@ -319,6 +387,13 @@ function fillCargoForm(c) {
   document.getElementById('cargoThisSideUp').checked = !!c.thisSideUp;
   const gs = document.getElementById('cargoGroupSku');
   if (gs) gs.checked = !!c.groupSameSku;
+  const pal = document.getElementById('cargoIsPallet');
+  if (pal) {
+    pal.checked = !!c.isPallet;
+    document.getElementById('palletSection').style.display = c.isPallet ? 'block' : 'none';
+    formPalletItems = (c.palletItems ?? []).map((it) => ({ ...it }));
+    renderPalletItems();
+  }
   document.getElementById('cargoPriority').value = c.priority ?? 'normal';
 }
 
@@ -351,6 +426,8 @@ function bindCargoForm() {
     } else {
       state.cargoTypes.push({ id: `C${state.nextCargoId++}`, visible: true, ...data });
       document.getElementById('cargoName').value = `${t('name')} ${String.fromCharCode(64 + Math.min(state.cargoTypes.length + 1, 26))}`;
+      formPalletItems = [];
+      renderPalletItems();
     }
 
     renderCargoList();
@@ -509,13 +586,20 @@ function bindActions() {
   });
 }
 
+let lastDetails = null;
+
 export function showDetails(p) {
   const panel = document.getElementById('detailsPanel');
   if (!panel) return;
-  if (!p) { panel.style.display = 'none'; return; }
+  if (!p) { lastDetails = null; panel.style.display = 'none'; return; }
+  lastDetails = p;
   const rotLabel = (p.yaw || p.pitch || p.roll)
     ? `yaw=${p.yaw}° pitch=${p.pitch}° roll=${p.roll}°`
     : '—';
+  const palletRows = (p.isPallet && p.palletItems?.length)
+    ? `<div class="d-row"><span>${t('palletContents')}</span><strong>${p.palletItems.map((it) =>
+        `${escapeHtml(it.name)} ×${it.quantity} (${fmtWt(it.weightKg)}${wtUnit()})`).join('<br>')}</strong></div>`
+    : '';
   document.getElementById('detailsBody').innerHTML = `
     <div class="d-row"><span>${t('name')}</span><strong>${escapeHtml(p.name)}</strong></div>
     <div class="d-row"><span>${t('container')}</span>${p.containerNum}</div>
@@ -525,14 +609,21 @@ export function showDetails(p) {
     <div class="d-row"><span>${t('orientation')}</span>${rotLabel}</div>
     <div class="d-row"><span>${t('weight')}</span>${fmtWt(p.weightKg ?? 0)} ${wtUnit()}</div>
     <div class="d-row"><span>${t('topLoadLimit')}</span>${p.maxLoadOnTopKg === Infinity || p.maxLoadOnTopKg == null ? '∞' : fmtWt(p.maxLoadOnTopKg) + ' ' + wtUnit()}</div>
-    <div class="d-row"><span>${t('constraints')}</span>${p.thisSideUp ? '↑' : ''} ${p.nonStackable ? '⊘' : ''}</div>
+    <div class="d-row"><span>${t('constraints')}</span>${p.thisSideUp ? '↑' : ''} ${p.nonStackable ? '⊘' : ''} ${p.isPallet ? '▤' : ''}</div>
+    ${palletRows}
   `;
   panel.style.display = 'block';
 }
 
 function hideDetails() {
+  lastDetails = null;
   const panel = document.getElementById('detailsPanel');
   if (panel) panel.style.display = 'none';
+}
+
+/** Re-render the open details panel (units/i18n changed). */
+function refreshDetails() {
+  if (lastDetails) showDetails(lastDetails);
 }
 
 export function renderAll() {
@@ -541,6 +632,8 @@ export function renderAll() {
   renderPresets();
   renderCargoList();
   applyUnitLabels();
+  renderPalletItems();
+  refreshDetails();
   setEditMode(editingId);
   const titleInput = document.getElementById('planTitle');
   if (titleInput) {
@@ -593,13 +686,15 @@ function renderCargoList() {
     if (c.rotatable?.roll) rotAxes.push('R');
     const priorityBadge = c.priority && c.priority !== 'normal'
       ? `<span class="badge ${c.priority}">${c.priority}</span>` : '';
+    const palletBadge = c.isPallet
+      ? `<span class="badge pallet" title="${t('palletContents')}">▤${c.palletItems?.length ?? 0}</span>` : '';
     const hidden = c.visible === false;
     const row = document.createElement('div');
     row.className = 'cargo-row' + (hidden ? ' hidden-cargo' : '');
     row.innerHTML = `
       <div class="swatch" style="background:${c.color}"></div>
       <div class="cargo-info">
-        <div class="cargo-name">${escapeHtml(c.name)} <span class="qty">×${c.quantity}</span> ${priorityBadge}</div>
+        <div class="cargo-name">${escapeHtml(c.name)} <span class="qty">×${c.quantity}</span> ${priorityBadge}${palletBadge}</div>
         <div class="cargo-meta">${fmtLen(c.length)}×${fmtLen(c.width)}×${fmtLen(c.height)}${lenUnit()} · ${fmtWt(c.weightKg)}${wtUnit()}</div>
         <div class="cargo-meta">≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · top≤${fmtWt(c.maxLoadOnTopKg)}${c.maxLoadOnTopKg === Infinity ? '' : wtUnit()} · ${rotAxes.join('') || '—'}${c.thisSideUp ? ' ·↑' : ''}${c.groupSameSku ? ' ·▦' : ''}</div>
       </div>
@@ -732,6 +827,8 @@ function normalizeCargo(c) {
     maxLoadOnTopKg: Math.max(0, numOr(c.maxLoadOnTopKg, Infinity)),
     supportRatioMin: Math.min(1, Math.max(0, numOr(c.supportRatioMin, 0.8))),
     groupSameSku: c.groupSameSku ?? false,
+    isPallet: c.isPallet === true,
+    palletItems: c.isPallet === true ? sanitizePalletItems(c.palletItems) : null,
     priority: ['normal', 'urgent', 'lifo'].includes(c.priority) ? c.priority : 'normal',
     visible: c.visible !== false,
   };
