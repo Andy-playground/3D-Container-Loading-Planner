@@ -58,7 +58,7 @@ python3 -m http.server 8000
 ```bash
 node tests/packer.test.js
 ```
-測試涵蓋 packer 8 案例 + COG / 軸載 / 橫向平衡 / loadSeq / 未裝載原因 / packAuto / groupSameSku（共 65+ 斷言）。
+測試涵蓋 packer / COG / 軸載 / 橫向平衡 / loadSeq / 未裝載原因 / packAuto / groupSameSku / i18n 鍵一致性 / 單位轉換（共 77 斷言）。
 
 ### CSV 匯入格式
 側欄「下載 CSV 範本」可取得範本，欄位：
@@ -70,7 +70,7 @@ name, length_cm, width_cm, height_cm, weight_kg, quantity, color, max_stack_laye
 
 ```
 .
-├── index.html              # 入口（含 three.js import map）
+├── index.html              # 入口
 ├── SDD.md                  # 系統設計文件
 ├── package.json
 ├── serve.py                # 開發伺服器（no-cache）
@@ -86,6 +86,7 @@ name, length_cm, width_cm, height_cm, weight_kg, quantity, color, max_stack_laye
 │   ├── analytics.js        # 重心 + 軸載 + 橫向平衡
 │   ├── exporters.js        # TXT / CSV / PDF（內嵌 3D 快照）
 │   ├── i18n.js             # 中／英 翻譯
+│   ├── units.js            # 公英制單位轉換
 │   └── demo.js             # 示範資料
 ├── styles/
 │   └── main.css
