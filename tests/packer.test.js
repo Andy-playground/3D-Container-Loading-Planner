@@ -355,6 +355,19 @@ console.log('T13: 左右橫向平衡');
   console.log(`  → 中心 ok=${centered.ok}，偏移 ${offset.offsetCm.toFixed(0)}cm → ${offset.side} 警示`);
 }
 
+// ===== T14: i18n key parity =====
+console.log('T14: i18n 鍵一致性');
+{
+  const { dictionaries } = await import('../src/i18n.js');
+  const zh = Object.keys(dictionaries['zh-Hant']).sort();
+  const en = Object.keys(dictionaries['en']).sort();
+  const missingInEn = zh.filter(k => !en.includes(k));
+  const missingInZh = en.filter(k => !zh.includes(k));
+  assert(missingInEn.length === 0, `T14: keys missing in en: ${missingInEn.join(', ')}`);
+  assert(missingInZh.length === 0, `T14: keys missing in zh-Hant: ${missingInZh.join(', ')}`);
+  console.log(`  → zh-Hant ${zh.length} 鍵 = en ${en.length} 鍵`);
+}
+
 // ===== Summary =====
 console.log('\n========================');
 console.log(`通過: ${passed}, 失敗: ${failed}`);

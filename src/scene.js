@@ -1,7 +1,8 @@
 // Three.js scene management — per SDD §7
-// three.js is vendored (vendor/) so the app works fully offline; the bare
-// "three" specifier resolves via the import map in index.html.
-import * as THREE from 'three';
+// three.js is vendored (vendor/) so the app works fully offline. OrbitControls
+// is patched to import the vendored build directly — no import map needed,
+// which keeps Safari 15 (NFR-2) working.
+import * as THREE from '../vendor/three.module.min.js';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 
 let scene, camera, renderer, controls;

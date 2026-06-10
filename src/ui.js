@@ -187,17 +187,28 @@ function renderPresets() {
 }
 
 // ===== Cargo form =====
+// Parse a numeric field where 0 is a meaningful value (so `|| default`
+// would silently discard it) — fall back only on blank/invalid input.
+function numOr(value, fallback) {
+  const v = parseFloat(value);
+  return isFinite(v) ? v : fallback;
+}
+
+function sanitizeColor(c, fallback = '#3498db') {
+  return /^#[0-9a-fA-F]{6}$/.test(String(c ?? '')) ? c : fallback;
+}
+
 function readCargoForm() {
   const name = document.getElementById('cargoName').value.trim() || `${t('name')} ${state.cargoTypes.length + 1}`;
   const length = parseFloat(document.getElementById('cargoL').value);
   const width = parseFloat(document.getElementById('cargoW').value);
   const height = parseFloat(document.getElementById('cargoH').value);
-  const weightKg = parseFloat(document.getElementById('cargoWeight').value) || 0;
+  const weightKg = Math.max(0, numOr(document.getElementById('cargoWeight').value, 0));
   const quantity = parseInt(document.getElementById('cargoQty').value);
-  const color = document.getElementById('cargoColor').value;
-  const maxStackLayers = parseInt(document.getElementById('cargoMaxLayers').value) || 99;
-  const maxLoadOnTopKg = parseFloat(document.getElementById('cargoMaxLoadTop').value) || Infinity;
-  const supportRatioMin = (parseFloat(document.getElementById('cargoSupportRatio').value) || 80) / 100;
+  const color = sanitizeColor(document.getElementById('cargoColor').value);
+  const maxStackLayers = Math.max(1, Math.round(numOr(document.getElementById('cargoMaxLayers').value, 99)));
+  const maxLoadOnTopKg = Math.max(0, numOr(document.getElementById('cargoMaxLoadTop').value, Infinity));
+  const supportRatioMin = Math.min(1, Math.max(0, numOr(document.getElementById('cargoSupportRatio').value, 80) / 100));
   const allowYaw = document.getElementById('cargoYaw').checked;
   const allowPitch = document.getElementById('cargoPitch').checked;
   const allowRoll = document.getElementById('cargoRoll').checked;
@@ -375,7 +386,7 @@ function importCargoCSV(text) {
       length, width, height,
       weightKg: parseFloat(col(row, 'weight_kg') ?? col(row, 'weight')) || 0,
       quantity,
-      color: col(row, 'color') || palette[(state.nextCargoId - 1) % palette.length],
+      color: sanitizeColor(col(row, 'color'), palette[(state.nextCargoId - 1) % palette.length]),
       rotatable: { yaw: true, pitch: false, roll: false },
       thisSideUp: !(tsu === '0' || tsu === 'false' || tsu === 'no'),
       maxStackLayers: parseInt(col(row, 'max_stack_layers')) || 99,
@@ -629,15 +640,28 @@ function saveToStorage() {
   }
 }
 
+/** Returns a sane cargo object, or null if dims/quantity are unusable. */
 function normalizeCargo(c) {
+  const length = parseFloat(c?.length);
+  const width = parseFloat(c?.width);
+  const height = parseFloat(c?.height);
+  const quantity = parseInt(c?.quantity);
+  if (![length, width, height].every((v) => isFinite(v) && v > 0) || !isFinite(quantity) || quantity <= 0) {
+    return null;
+  }
   return {
     ...c,
+    name: String(c.name ?? 'Cargo'),
+    length, width, height, quantity,
+    weightKg: Math.max(0, numOr(c.weightKg, 0)),
+    color: sanitizeColor(c.color),
     rotatable: c.rotatable ?? { yaw: true, pitch: false, roll: false },
     thisSideUp: c.thisSideUp ?? true,
-    maxStackLayers: c.maxStackLayers ?? 99,
-    maxLoadOnTopKg: c.maxLoadOnTopKg ?? Infinity,
-    supportRatioMin: c.supportRatioMin ?? 0.8,
+    maxStackLayers: Math.max(1, Math.round(numOr(c.maxStackLayers, 99))),
+    maxLoadOnTopKg: Math.max(0, numOr(c.maxLoadOnTopKg, Infinity)),
+    supportRatioMin: Math.min(1, Math.max(0, numOr(c.supportRatioMin, 0.8))),
     groupSameSku: c.groupSameSku ?? false,
+    priority: ['normal', 'urgent', 'lifo'].includes(c.priority) ? c.priority : 'normal',
     visible: c.visible !== false,
   };
 }
@@ -649,7 +673,7 @@ function loadFromStorage() {
     const data = JSON.parse(raw);
     if (data.containerId) state.containerId = data.containerId;
     if (Array.isArray(data.cargoTypes)) {
-      state.cargoTypes = data.cargoTypes.map(normalizeCargo);
+      state.cargoTypes = data.cargoTypes.map(normalizeCargo).filter(Boolean);
     }
     if (data.nextCargoId) state.nextCargoId = data.nextCargoId;
     if (typeof data.planTitle === 'string') state.planTitle = data.planTitle;
@@ -703,7 +727,7 @@ function importJSON(e) {
         }
       }
       if (data.containerId) state.containerId = data.containerId;
-      if (Array.isArray(data.cargoTypes)) state.cargoTypes = data.cargoTypes.map(normalizeCargo);
+      if (Array.isArray(data.cargoTypes)) state.cargoTypes = data.cargoTypes.map(normalizeCargo).filter(Boolean);
       if (typeof data.metadata?.title === 'string') state.planTitle = data.metadata.title;
       renderAll();
       saveToStorage();

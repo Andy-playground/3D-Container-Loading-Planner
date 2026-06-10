@@ -235,6 +235,9 @@ const dict = {
 
 let currentLang = 'zh-Hant';
 
+// Exposed for tests (key-set parity check between locales)
+export const dictionaries = dict;
+
 export function getLang() { return currentLang; }
 
 export function t(key) {
