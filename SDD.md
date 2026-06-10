@@ -135,7 +135,7 @@ rotatable: {
 | ID | 功能 | 描述 | 優先級 | 現狀 |
 |---|---|---|---|---|
 | 4.1 | 棧板化（pallet as unit）| 一個棧板含多箱，整體裝載 | P2 | ✅ v3.1 |
-| 4.2 | 填充規則 | columnFill（整列）/ mixed（混裝）| P2 | ❌ |
+| 4.2 | 填充規則 | columnFill（整列）/ mixed（混裝）| P2 | ✅ v3.1 |
 
 **4.1 規格**：
 - 棧板本身為一個 cargo（含尺寸、重量、堆疊層數）
@@ -563,6 +563,7 @@ Total Items: 243
 - [x] M6-2: UX 一致性 — 貨物變更自動 re-pack（Iteration 2）
 - [x] M6-3: `packAuto` 剪枝 2.2×、公英制單位 cm/kg ↔ in/lb（Iteration 3）
 - [x] M6-4: 棧板化 FR-4.1 完整實作 + 明細就地刷新（Iteration 4）
+- [x] M6-5: 填充規則 FR-4.2 columnFill / mixed（Iteration 5）
 
 ### Future（無排程）
 - 危險品分隔規則（IMO/IMDG）

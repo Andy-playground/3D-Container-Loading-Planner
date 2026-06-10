@@ -29,9 +29,10 @@ function start() {
     if (state.cargoTypes.length === 0) return null;
 
     const t0 = performance.now();
+    const packOpts = { allowMultiContainer: true, maxContainers: 20, fillRule: state.fillRule };
     let result, container, meta = {};
     if (state.containerId === ui.AUTO_CONTAINER_ID) {
-      const best = packAuto(state.cargoTypes, getAllContainers(), { allowMultiContainer: true, maxContainers: 20 });
+      const best = packAuto(state.cargoTypes, getAllContainers(), packOpts);
       if (!best) return null;
       result = best.result;
       container = best.containerSpec;
@@ -39,7 +40,7 @@ function start() {
     } else {
       container = getContainer(state.containerId);
       if (!container) return null;
-      result = pack(state.cargoTypes, container, { allowMultiContainer: true, maxContainers: 20 });
+      result = pack(state.cargoTypes, container, packOpts);
     }
     enrichResult(result, container);
     const t1 = performance.now();

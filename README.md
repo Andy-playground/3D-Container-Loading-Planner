@@ -14,7 +14,8 @@
 - ✅ 約束：重量、堆疊層數、支撐比例、頂壓承重、面朝上
 - ✅ 旋轉軸向（yaw / pitch / roll）+ This-Side-Up
 - ✅ 裝載優先權（normal / urgent / lifo）+ **同 SKU 空間聚集**（v3.0）
-- ✅ **棧板化（FR-4）**：整板裝載 + 子貨物清單（明細、報表同步呈現）（v3.1）
+- ✅ **棧板化（FR-4.1）**：整板裝載 + 子貨物清單（明細、報表同步呈現）（v3.1）
+- ✅ **填充規則（FR-4.2）**：mixed（利用率優先）/ columnFill（同類整列、卸貨優先）（v3.1）
 
 ### 貨物管理
 - ✅ **貨物編輯／複製／顯示隱藏**（v3.0）
@@ -59,7 +60,7 @@ python3 -m http.server 8000
 ```bash
 node tests/packer.test.js
 ```
-測試涵蓋 packer / COG / 軸載 / 橫向平衡 / loadSeq / 未裝載原因 / packAuto / groupSameSku / i18n 鍵一致性 / 單位轉換／棧板化（共 82 斷言）。
+測試涵蓋 packer / COG / 軸載 / 橫向平衡 / loadSeq / 未裝載原因 / packAuto / groupSameSku / i18n 鍵一致性 / 單位轉換／棧板化／填充規則（共 86 斷言）。
 
 ### CSV 匯入格式
 側欄「下載 CSV 範本」可取得範本，欄位：

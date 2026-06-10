@@ -415,6 +415,39 @@ console.log('T16: 棧板化 pallet-as-unit');
   console.log(`  → 10 板全數整板裝載於底層，內容物清單隨 placement 傳遞`);
 }
 
+// ===== T17: Fill rule columnFill (FR-4.2) =====
+console.log('T17: 填充規則 columnFill');
+{
+  const mk = () => (['A', 'B'].map((id, i) => ({
+    id, name: id, length: 100, width: 100, height: 100,
+    weightKg: 10, quantity: 8, color: i ? '#00f' : '#f00', groupSameSku: false,
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8,
+  })));
+  const c = getContainer('OCEAN_40HQ');
+  const spread = (placements, cargoId) => {
+    const pts = placements.filter(p => p.cargoId === cargoId)
+      .map(p => [p.x + p.L / 2, p.y + p.W / 2, p.z + p.H / 2]);
+    let sum = 0, n = 0;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        sum += Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1], pts[i][2] - pts[j][2]);
+        n++;
+      }
+    }
+    return n ? sum / n : 0;
+  };
+  const col = pack(mk(), c, { fillRule: 'columnFill' }).containers[0].placements;
+  const mixed = pack(mk(), c, { fillRule: 'mixed' }).containers[0].placements;
+  assert(col.length === mixed.length, `T17: same box count, got ${col.length} vs ${mixed.length}`);
+  assert(checkNoOverlap(col) === null, 'T17: overlap under columnFill');
+  for (const id of ['A', 'B']) {
+    assert(spread(col, id) <= spread(mixed, id) + 0.001,
+      `T17: ${id} columnFill spread ${spread(col, id).toFixed(1)} should be ≤ mixed ${spread(mixed, id).toFixed(1)}`);
+  }
+  console.log(`  → columnFill 下 A/B 平均距離 ${spread(col, 'A').toFixed(0)}/${spread(col, 'B').toFixed(0)}cm ≤ mixed`);
+}
+
 // ===== Summary =====
 console.log('\n========================');
 console.log(`通過: ${passed}, 失敗: ${failed}`);

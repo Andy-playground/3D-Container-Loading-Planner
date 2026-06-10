@@ -14,8 +14,13 @@ export function pack(cargoTypes, containerSpec, options = {}) {
   const opts = {
     allowMultiContainer: true,
     maxContainers: 20,
+    // FR-4.2 fill rule: 'mixed' packs purely for utilization;
+    // 'columnFill' clusters every SKU spatially (easier unloading) by
+    // forcing groupSameSku on all boxes.
+    fillRule: 'mixed',
     ...options,
   };
+  const columnFill = opts.fillRule === 'columnFill';
 
   // 1. Expand quantity → individual box instances
   const allBoxes = [];
@@ -37,7 +42,7 @@ export function pack(cargoTypes, containerSpec, options = {}) {
         maxLoadOnTopKg: c.maxLoadOnTopKg ?? Infinity,
         supportRatioMin: c.supportRatioMin ?? 0.8,
         priority: c.priority ?? 'normal',
-        groupSameSku: c.groupSameSku ?? false,
+        groupSameSku: columnFill || (c.groupSameSku ?? false),
         // FR-4: pallet-as-unit — packed as one box; sub-items are statistical
         isPallet: c.isPallet ?? false,
         palletItems: c.palletItems ?? null,

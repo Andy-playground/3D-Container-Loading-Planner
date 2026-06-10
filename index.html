@@ -44,6 +44,13 @@
           <select id="containerSelect"></select>
         </div>
         <div id="containerInfo"></div>
+        <div class="field">
+          <label for="fillRule" data-i18n="fillRule">填充規則</label>
+          <select id="fillRule">
+            <option value="mixed">mixed（混裝，利用率優先）</option>
+            <option value="columnFill">columnFill（同類整列，卸貨優先）</option>
+          </select>
+        </div>
         <button id="customContainerToggle" class="link-btn" data-i18n="addCustomContainer">+ 新增自訂貨櫃</button>
         <div id="customContainerForm" style="display:none">
           <div class="field">

@@ -18,6 +18,7 @@ const state = {
   cargoTypes: [],
   nextCargoId: 1,
   planTitle: '',
+  fillRule: 'mixed', // FR-4.2: 'mixed' | 'columnFill'
 };
 
 let editingId = null; // cargo id currently loaded in the form for editing
@@ -244,6 +245,13 @@ function bindContainerSelect() {
     saveToStorage();
     emit('changed');
     emit('containerChanged');
+  });
+  const fill = document.getElementById('fillRule');
+  fill?.addEventListener('change', () => {
+    state.fillRule = fill.value === 'columnFill' ? 'columnFill' : 'mixed';
+    saveToStorage();
+    emit('changed');
+    emit('containerChanged'); // re-pack with the new rule
   });
 }
 
@@ -649,6 +657,16 @@ export function renderAll() {
       if (k) opt.textContent = t(k);
     }
   }
+  // Fill rule dropdown (i18n + state)
+  const fill = document.getElementById('fillRule');
+  if (fill) {
+    const map = { mixed: 'fillMixed', columnFill: 'fillColumn' };
+    for (const opt of fill.options) {
+      const k = map[opt.value];
+      if (k) opt.textContent = t(k);
+    }
+    fill.value = state.fillRule;
+  }
 }
 
 function renderContainerInfo() {
@@ -799,6 +817,7 @@ function saveToStorage() {
       cargoTypes: state.cargoTypes,
       nextCargoId: state.nextCargoId,
       planTitle: state.planTitle,
+      fillRule: state.fillRule,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch (e) {
@@ -845,6 +864,7 @@ function loadFromStorage() {
     }
     if (data.nextCargoId) state.nextCargoId = data.nextCargoId;
     if (typeof data.planTitle === 'string') state.planTitle = data.planTitle;
+    if (data.fillRule === 'columnFill' || data.fillRule === 'mixed') state.fillRule = data.fillRule;
     rebuildContainerSelect();
   } catch (e) {
     console.warn('localStorage load failed', e);

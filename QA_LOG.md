@@ -151,5 +151,22 @@ v3.0 全部新功能 + 既有程式碼回歸檢查（src/*.js、index.html、ven
 - `node tests/packer.test.js` → **82 斷言全過**
 - Chromium 煙霧 ×4 全綠、零 console error
 
+### 收斂前複查
+複查發現 Iteration 4 的收斂聲明不精確：FR-4.2 填充規則（columnFill / mixed）尚未實作 → 進入 Iteration 5。
+
+---
+
+## Iteration 5 — 2026-06-10（FR-4.2 填充規則）→ 循環收斂
+
+| # | 視角 | 項目 | 結果 |
+|---|---|---|---|
+| Q18 | Quality | FR-4.2：全域填充規則 `mixed`（利用率優先）/ `columnFill`（強制全部 SKU 空間聚集，卸貨優先），選擇器置於貨櫃區、切換即重排、持久化、i18n | ✅ 實作（packer `options.fillRule` → 全 box `groupSameSku=true`） |
+| Q19 | Quality | T17：columnFill 下各 SKU 平均間距 ≤ mixed、箱數一致、無重疊 | ✅ 新增 5 斷言 |
+| P14 | Production | Chromium：切換 columnFill 自動重排、重整持久化、英文選項標籤 | ✅ 零 console error |
+
+### 驗證
+- `node tests/packer.test.js` → **86 斷言全過**
+- Chromium 煙霧 ×5 全綠
+
 ### 循環收斂聲明
-QA_LOG 遺留清單已全數結案；SDD §4 功能需求（FR-1～FR-5）除 2.3「旋轉步長 45°/15°」（P2，對軸對齊 bin-packing 無實質意義，標記為不做）外全部實作。後續若有新驗收要求，重新觸發 QA 循環即可。
+QA_LOG 遺留清單已全數結案。SDD §4 功能需求現狀：FR-1～FR-5 全部實作完成，唯一例外為 FR-2.3「旋轉步長 45°/15°」（P2）——對軸對齊（AABB）bin-packing 演算法無實質意義，正式標記為**不做**（won't-do）。品質基線：86 個演算法/分析/i18n/單位斷言 + 5 套瀏覽器煙霧測試。後續若有新驗收要求，重新觸發 QA 循環即可。
