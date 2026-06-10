@@ -69,7 +69,26 @@ function start() {
   });
 
   ui.on('changed', (payload) => {
-    if (payload?.opacity !== undefined) setOpacity(payload.opacity);
+    if (payload?.opacity !== undefined) {
+      setOpacity(payload.opacity);
+      return;
+    }
+    // Cargo list changed (add/edit/remove/duplicate/import): keep the plan
+    // live — re-pack if one exists, or clear the stale scene when emptied.
+    if (payload?.cargo && lastResult) {
+      const state = ui.getState();
+      if (state.cargoTypes.length > 0) {
+        runPack();
+      } else {
+        lastResult = null;
+        lastContainerSpec = null;
+        const spec = (state.containerId !== ui.AUTO_CONTAINER_ID && getContainer(state.containerId))
+          || getContainer('OCEAN_40HQ');
+        renderResult({ containers: [], unplaced: [] }, spec);
+        document.getElementById('stats').textContent = t('notPackedYet');
+        resetSequenceBar();
+      }
+    }
   });
 
   ui.on('labelsToggle', (visible) => setLabelsVisible(visible));

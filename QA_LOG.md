@@ -48,4 +48,39 @@ v3.0 全部新功能 + 既有程式碼回歸檢查（src/*.js、index.html、ven
 - [ ] P2：`packAuto` 大量櫃型時的效能上限（可加 volume 下界剪枝）
 - [ ] 公英制單位切換（商務功能 backlog）
 - [ ] 棧板化 FR-4（SDD 既定範圍，目前簡化處理）
-- [ ] 行動裝置（< 860px）下 seqBar 與 detailsPanel 重疊檢查
+- [x] 行動裝置（< 860px）下 seqBar 與 detailsPanel 重疊檢查 → Iteration 2 完成
+
+---
+
+## Iteration 2 — 2026-06-10（UX 一致性 + 行動版面）
+
+### Production 視角
+
+| # | 項目 | 結果 | 處置 |
+|---|---|---|---|
+| P8 | 行動裝置 390×844：seqBar 是否溢出/重疊 | ✅ boundingBox (35, 784, 320×48) 完整置於視窗內；topbar 正常換行 | 截圖驗證，無需處理 |
+| P9 | 環境限制：`ScheduleWakeup`/`CronCreate` 不存在 | 🟡 | 改以 Monitor 計時喚醒驅動審查循環 |
+
+### Quality 視角
+
+| # | 項目 | 結果 | 處置 |
+|---|---|---|---|
+| Q8 | UX 不一致：換貨櫃會自動 re-pack，但編輯/刪除/複製/匯入貨物後 3D 仍顯示舊計畫 | 🔴 發現 | **已修**：cargo 變更事件帶 `{cargo:true}`，已有計畫時自動 re-pack |
+| Q9 | 貨物全部刪除後場景殘留舊箱子、seqBar 殘留 | 🔴 發現 | **已修**：清空時 render 空櫃、stats 重置為「尚未裝載」、seqBar 隱藏 |
+| Q10 | 清空時 AUTO / 已刪自訂櫃 id 造成 `getContainer` undefined → render crash | 🟡 邊界 | **已修**：fallback `OCEAN_40HQ` |
+
+### 本輪修正清單
+1. `ui.js`：6 處 cargo 變更 emit 加上 `{cargo:true}` 標記
+2. `app.js`：cargo 變更自動 re-pack；清空時清場景 + 重置 stats/seqBar；container spec fallback
+
+### 驗證（headless Chromium）
+- 編輯數量 20→40 → stats 自動變 40/40 ✅
+- 複製貨物 → 80/80 ✅
+- 全部刪除 → 「尚未裝載」、seqBar 隱藏 ✅
+- 行動裝置 390px 版面 ✅、零 console error
+- `node tests/packer.test.js` → 67 斷言全過
+
+### 遺留事項（下輪檢視）
+- [ ] P2：`packAuto` 效能剪枝（接受中，觀察）
+- [ ] 公英制單位切換（商務 backlog）
+- [ ] 棧板化 FR-4（SDD 既定範圍）

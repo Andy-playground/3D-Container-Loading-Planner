@@ -285,7 +285,7 @@ function bindCargoForm() {
 
     renderCargoList();
     saveToStorage();
-    emit('changed');
+    emit('changed', { cargo: true });
   });
 
   document.getElementById('cancelEditBtn')?.addEventListener('click', () => {
@@ -307,7 +307,7 @@ function bindCsvImport() {
         const added = importCargoCSV(evt.target.result);
         renderCargoList();
         saveToStorage();
-        emit('changed');
+        emit('changed', { cargo: true });
         alert(`${t('csvImportedPrefix')}${added}`);
       } catch (err) {
         alert(t('csvError') + err.message);
@@ -414,7 +414,7 @@ function bindActions() {
     setEditMode(null);
     renderCargoList();
     saveToStorage();
-    emit('changed');
+    emit('changed', { cargo: true });
   });
   document.getElementById('exportBtn').addEventListener('click', exportJSON);
   document.getElementById('importBtn').addEventListener('click', () => {
@@ -547,7 +547,7 @@ function renderCargoList() {
       if (editingId === btn.dataset.id) setEditMode(null);
       renderCargoList();
       saveToStorage();
-      emit('changed');
+      emit('changed', { cargo: true });
     });
   });
   listEl.querySelectorAll('.edit-btn').forEach((btn) => {
@@ -568,7 +568,7 @@ function renderCargoList() {
       state.cargoTypes.splice(idx + 1, 0, copy);
       renderCargoList();
       saveToStorage();
-      emit('changed');
+      emit('changed', { cargo: true });
     });
   });
   listEl.querySelectorAll('.eye-btn').forEach((btn) => {
@@ -731,7 +731,7 @@ function importJSON(e) {
       if (typeof data.metadata?.title === 'string') state.planTitle = data.metadata.title;
       renderAll();
       saveToStorage();
-      emit('changed');
+      emit('changed', { cargo: true });
     } catch (err) {
       alert(t('jsonError') + err.message);
     }
