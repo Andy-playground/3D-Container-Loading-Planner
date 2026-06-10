@@ -37,6 +37,7 @@ export function pack(cargoTypes, containerSpec, options = {}) {
         maxLoadOnTopKg: c.maxLoadOnTopKg ?? Infinity,
         supportRatioMin: c.supportRatioMin ?? 0.8,
         priority: c.priority ?? 'normal',
+        groupSameSku: c.groupSameSku ?? false,
       });
     }
   }
@@ -51,6 +52,7 @@ export function pack(cargoTypes, containerSpec, options = {}) {
     const vb = b.L * b.W * b.H;
     return vb - va;
   });
+
 
   // 3. Loop containers
   const containers = [];
@@ -70,14 +72,56 @@ export function pack(cargoTypes, containerSpec, options = {}) {
     if (!opts.allowMultiContainer) break;
   }
 
-  // 4. Unplaced summary by cargoId
+  // 3b. Loading sequence: per container, physical load order is back of the
+  // container first (door at +X), bottom before top; global seq spans containers.
+  let globalSeq = 0;
+  for (const ct of containers) {
+    const ordered = [...ct.placements].sort(
+      (a, b) => a.x - b.x || a.z - b.z || a.y - b.y
+    );
+    for (const p of ordered) p.loadSeq = ++globalSeq;
+  }
+
+  // 4. Unplaced summary by cargoId (+ failure reason from last attempt)
   const unplacedMap = new Map();
   for (const box of remaining) {
-    unplacedMap.set(box.cargoId, (unplacedMap.get(box.cargoId) ?? 0) + 1);
+    const key = box.cargoId;
+    const entry = unplacedMap.get(key) ?? { cargoId: key, name: box.name, count: 0, reasons: {} };
+    entry.count++;
+    const r = box.unplacedReason ?? 'nospace';
+    entry.reasons[r] = (entry.reasons[r] ?? 0) + 1;
+    unplacedMap.set(key, entry);
   }
-  const unplaced = Array.from(unplacedMap.entries()).map(([cargoId, count]) => ({ cargoId, count }));
+  const unplaced = Array.from(unplacedMap.values());
 
   return { containers, unplaced };
+}
+
+/**
+ * Try every candidate container spec and return the best plan.
+ * Score: fewest unplaced boxes → fewest containers → highest avg volume utilization.
+ * @returns {Object} { result, containerSpec }
+ */
+export function packAuto(cargoTypes, containerSpecs, options = {}) {
+  let best = null;
+  for (const spec of containerSpecs) {
+    const result = pack(cargoTypes, spec, options);
+    const unplacedCount = result.unplaced.reduce((s, u) => s + u.count, 0);
+    const containerCount = result.containers.length;
+    const avgUtil = containerCount
+      ? result.containers.reduce((s, ct) => s + ct.stats.volumeUtilization, 0) / containerCount
+      : 0;
+    const candidate = { result, containerSpec: spec, unplacedCount, containerCount, avgUtil };
+    if (
+      !best ||
+      candidate.unplacedCount < best.unplacedCount ||
+      (candidate.unplacedCount === best.unplacedCount && candidate.containerCount < best.containerCount) ||
+      (candidate.unplacedCount === best.unplacedCount && candidate.containerCount === best.containerCount && candidate.avgUtil > best.avgUtil)
+    ) {
+      best = candidate;
+    }
+  }
+  return best ? { result: best.result, containerSpec: best.containerSpec } : null;
 }
 
 function packOneContainer(boxes, container, containerNum) {
@@ -89,20 +133,57 @@ function packOneContainer(boxes, container, containerNum) {
   for (const box of boxes) {
     // Container weight check
     if (totalWeight + box.weightKg > container.payloadKg + EPSILON) {
+      box.unplacedReason = box.weightKg > container.payloadKg ? 'overweight' : 'nospace';
       unplaced.push(box);
       continue;
     }
 
     const orientations = getValidOrientations(box);
+
+    // Oversize: no orientation fits even an empty container
+    const internal = container.internal;
+    const fitsAtAll = orientations.some(
+      (o) => o.L <= internal.length + EPSILON &&
+             o.W <= internal.width + EPSILON &&
+             o.H <= internal.height + EPSILON
+    );
+    if (!fitsAtAll) {
+      box.unplacedReason = 'oversize';
+      unplaced.push(box);
+      continue;
+    }
     let placed = false;
 
     // Sort EPs to encourage back-to-front, bottom-up packing.
     // Door is at +X end → low x = furthest from door = preferred.
     // This naturally produces a "staircase to door" pattern when not full,
     // with tall stacks at the back supporting lighter ones in front.
-    const sortedEPs = [...extremePoints].sort(
+    let sortedEPs = [...extremePoints].sort(
       (a, b) => a.z - b.z || a.x - b.x || a.y - b.y
     );
+
+    // groupSameSku (FR 3.4): prefer placement points nearest to boxes of the
+    // same cargo already placed, so the SKU forms one spatial cluster.
+    if (box.groupSameSku) {
+      const same = placements.filter((p) => p.cargoId === box.cargoId);
+      if (same.length > 0) {
+        const distSq = (ep) => {
+          let min = Infinity;
+          for (const p of same) {
+            const dx = ep.x - (p.x + p.L / 2);
+            const dy = ep.y - (p.y + p.W / 2);
+            const dz = ep.z - (p.z + p.H / 2);
+            const d = dx * dx + dy * dy + dz * dz;
+            if (d < min) min = d;
+          }
+          return min;
+        };
+        sortedEPs = sortedEPs
+          .map((ep) => ({ ep, d: distSq(ep) }))
+          .sort((a, b) => a.d - b.d)
+          .map((x) => x.ep);
+      }
+    }
 
     for (const ep of sortedEPs) {
       for (const orient of orientations) {
@@ -137,7 +218,10 @@ function packOneContainer(boxes, container, containerNum) {
       if (placed) break;
     }
 
-    if (!placed) unplaced.push(box);
+    if (!placed) {
+      box.unplacedReason = 'nospace';
+      unplaced.push(box);
+    }
   }
 
   return { placements, unplaced };

@@ -53,7 +53,7 @@
 ### 2.2 技術選型
 | 層級 | 技術 | 說明 |
 |---|---|---|
-| 渲染引擎 | Three.js (r150+) | 從 esm.sh CDN 載入，無需 build |
+| 渲染引擎 | Three.js (r160) | vendored 至 `vendor/`（import map），無需 build、離線可用 |
 | 模組化 | ES Modules | 原生 `import`/`export` |
 | 演算法 | Extreme-Point 3D bin-packing | 純 JavaScript |
 | 持久化 | localStorage | 瀏覽器端 |
@@ -544,6 +544,19 @@ Total Items: 243
 - [x] M4-2: 重心計算（`src/analytics.js`，3D 場景中以橘色球體 + 落地線標示）
 - [x] M4-3: 軸載重均衡（truck only；前/後軸槓桿規則 + 失衡警示）
 - [x] M4-4: i18n（中/英；`src/i18n.js`，topbar 「Language」按鈕切換）
+
+### Phase 5: 商務級功能（v3.0）
+- [x] M5-1: 貨物編輯／複製／顯示隱藏（列表列操作按鈕）
+- [x] M5-2: 自訂貨櫃（localStorage 持久化；JSON 匯出含自訂貨櫃）
+- [x] M5-3: 自動選櫃 `packAuto`（評比準則：未裝載數 → 櫃數 → 平均體積利用率）
+- [x] M5-4: 裝載順序 `loadSeq`（櫃內由內而外、由下而上）+ 3D 步驟播放器
+- [x] M5-5: CSV 貨物清單匯入 + 範本下載
+- [x] M5-6: 未裝載原因（oversize / overweight / nospace）
+- [x] M5-7: 同 SKU 空間聚集（FR 3.4；EP 依距同類箱距離優先排序）
+- [x] M5-8: 左右橫向平衡檢查（COG 對寬度中線偏移 > 8% 警示）
+- [x] M5-9: 3D 截圖 PNG 匯出；PDF 報告內嵌 3D 快照 + 貨物彙總表
+- [x] M5-10: 計畫名稱、常用尺寸 preset（EUR/US 棧板、紙箱、油桶）
+- [x] M5-11: Three.js vendor 化（`vendor/` + import map），完全離線可用（NFR-4）
 
 ### Future（無排程）
 - 危險品分隔規則（IMO/IMDG）

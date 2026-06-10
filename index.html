@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title data-i18n="title">3D Container Loading Planner</title>
-  <link rel="stylesheet" href="styles/main.css?v=6">
+  <link rel="stylesheet" href="styles/main.css?v=7">
 </head>
 <body>
   <div id="topbar">
@@ -19,6 +19,7 @@
         <button id="exportTxtBtn" data-i18n="exportTxt">匯出 TXT</button>
         <button id="exportCsvBtn" data-i18n="exportCsv">匯出 CSV</button>
         <button id="exportPdfBtn" data-i18n="exportPdf">列印 / PDF</button>
+        <button id="exportPngBtn" data-i18n="exportPng">匯出 3D 截圖 (PNG)</button>
       </div>
     </div>
 
@@ -31,15 +32,53 @@
   <div id="main">
     <aside id="sidebar">
       <section>
+        <h3 data-i18n="planTitle">計畫名稱</h3>
+        <div class="field">
+          <input type="text" id="planTitle" data-i18n-placeholder="planTitlePlaceholder" placeholder="未命名計畫">
+        </div>
+      </section>
+
+      <section>
         <h3 data-i18n="chooseContainer">選擇貨櫃</h3>
         <div class="field">
           <select id="containerSelect"></select>
         </div>
         <div id="containerInfo"></div>
+        <button id="customContainerToggle" class="link-btn" data-i18n="addCustomContainer">+ 新增自訂貨櫃</button>
+        <div id="customContainerForm" style="display:none">
+          <div class="field">
+            <label for="ccName" data-i18n="containerName">貨櫃名稱</label>
+            <input type="text" id="ccName" placeholder="My Container">
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="ccL" data-i18n="lengthCm">長 (cm)</label>
+              <input type="number" id="ccL" value="1200" min="1">
+            </div>
+            <div class="field">
+              <label for="ccW" data-i18n="widthCm">寬 (cm)</label>
+              <input type="number" id="ccW" value="240" min="1">
+            </div>
+            <div class="field">
+              <label for="ccH" data-i18n="heightCm">高 (cm)</label>
+              <input type="number" id="ccH" value="260" min="1">
+            </div>
+          </div>
+          <div class="field">
+            <label for="ccPayload" data-i18n="payloadKgLabel">載重上限 (kg)</label>
+            <input type="number" id="ccPayload" value="25000" min="1">
+          </div>
+          <button id="ccSaveBtn" class="add-btn" data-i18n="saveCustomContainer">儲存貨櫃</button>
+        </div>
+        <button id="ccDeleteBtn" class="link-btn danger-link" style="display:none" data-i18n="deleteCustomContainer">刪除此自訂貨櫃</button>
       </section>
 
       <section>
         <h3 data-i18n="addCargoType">新增貨物類型</h3>
+        <div class="field">
+          <label for="cargoPreset" data-i18n="preset">常用尺寸</label>
+          <select id="cargoPreset"></select>
+        </div>
         <div class="field">
           <label for="cargoName" data-i18n="name">名稱</label>
           <input type="text" id="cargoName" value="貨物A">
@@ -110,7 +149,17 @@
           <input type="checkbox" id="cargoThisSideUp" checked>
           <label for="cargoThisSideUp" data-i18n="thisSideUpLabel">↑ This Side Up（鎖定 Pitch/Roll）</label>
         </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="cargoGroupSku">
+          <label for="cargoGroupSku" data-i18n="groupSameSkuLabel">同類貨物聚集擺放</label>
+        </div>
         <button id="addCargoBtn" class="add-btn" data-i18n="addCargo">+ 加入貨物</button>
+        <button id="cancelEditBtn" class="link-btn" style="display:none" data-i18n="cancelEdit">取消編輯</button>
+        <div class="csv-row">
+          <button id="importCsvBtn" class="mini-btn" data-i18n="importCsv">匯入 CSV</button>
+          <button id="csvTemplateBtn" class="mini-btn" data-i18n="csvTemplate">下載 CSV 範本</button>
+          <input type="file" id="importCsvFile" accept=".csv,.txt" style="display:none">
+        </div>
       </section>
 
       <section>
@@ -138,6 +187,11 @@
 
     <div id="canvasWrap">
       <div id="canvas"></div>
+      <div id="seqBar" style="display:none">
+        <button id="seqPlayBtn" title="Play">▶</button>
+        <input type="range" id="seqSlider" min="0" max="0" value="0">
+        <span id="seqLabel"></span>
+      </div>
       <div id="detailsPanel" style="display:none">
         <div id="detailsHeader">
           <span data-i18n="cargoDetails">貨物明細</span>
@@ -148,6 +202,9 @@
     </div>
   </div>
 
-  <script type="module" src="src/app.js?v=6"></script>
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
+  <script type="module" src="src/app.js?v=7"></script>
 </body>
 </html>
