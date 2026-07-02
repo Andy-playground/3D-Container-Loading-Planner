@@ -4,20 +4,26 @@
 // is handled by the `?v=` on the entry <script> tag in index.html only.
 import {
   initScene, renderResult, setOpacity, setLabelsVisible, setCOGVisible,
-  onBoxClick, setCargoVisibility, setStepLimit, getTotalSteps, captureImage,
+  onBoxClick, onBoxHover, setCargoVisibility, setStepLimit, playStep,
+  getTotalSteps, captureImage,
 } from './scene.js';
 import * as ui from './ui.js';
 import { pack, packAuto } from './packer.js';
 import { getContainer, getAllContainers } from './containers.js';
-import { loadDemo } from './demo.js';
+import { getDemoData } from './demo.js';
 import { enrichResult } from './analytics.js';
 import { exportTXT, exportCSV, exportPDF } from './exporters.js';
 import { initLang, toggleLang, t } from './i18n.js';
+import { toast, confirmDialog } from './toast.js';
 
 let lastResult = null;
 let lastContainerSpec = null;
 let lastMeta = {};
 let playTimer = null;
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
 function start() {
   initLang();
@@ -60,7 +66,7 @@ function start() {
   }
 
   ui.on('pack', () => {
-    if (!runPack()) alert(t('addAtLeastOne'));
+    if (!runPack()) toast(t('addAtLeastOne'), 'error');
   });
 
   ui.on('containerChanged', () => {
@@ -80,10 +86,28 @@ function start() {
 
   onBoxClick((placement) => ui.showDetails(placement));
 
-  document.getElementById('demoBtn')?.addEventListener('click', () => {
-    if (!confirm(t('confirmDemo'))) return;
-    loadDemo();
-    location.reload();
+  // Hover tooltip on 3D boxes
+  const tooltip = document.getElementById('sceneTooltip');
+  onBoxHover((p, clientX, clientY) => {
+    if (!tooltip) return;
+    if (!p) { tooltip.style.display = 'none'; return; }
+    tooltip.innerHTML = `
+      <div class="tt-name">${escapeHtml(p.name)}</div>
+      <div class="tt-meta">${t('loadSeqCol')} #${p.loadSeq ?? '—'} · ${p.weightKg ?? 0} kg</div>
+      <div class="tt-meta">${p.L}×${p.W}×${p.H} cm</div>`;
+    const wrap = document.getElementById('canvasWrap').getBoundingClientRect();
+    tooltip.style.display = 'block';
+    const x = Math.min(clientX - wrap.left + 14, wrap.width - tooltip.offsetWidth - 8);
+    const y = Math.min(clientY - wrap.top + 14, wrap.height - tooltip.offsetHeight - 8);
+    tooltip.style.left = `${Math.max(0, x)}px`;
+    tooltip.style.top = `${Math.max(0, y)}px`;
+  });
+
+  document.getElementById('demoBtn')?.addEventListener('click', async () => {
+    if (!(await confirmDialog(t('confirmDemo'), { okLabel: t('ok'), cancelLabel: t('cancel') }))) return;
+    ui.applyImportedData(getDemoData());
+    runPack();
+    toast(t('demoLoaded'), 'success');
   });
 
   // ===== Loading sequence playback =====
@@ -128,20 +152,37 @@ function start() {
     updateSeqLabel();
   });
 
-  seqPlayBtn?.addEventListener('click', () => {
-    if (playTimer) { stopPlayback(); return; }
+  const seqSpeed = document.getElementById('seqSpeed');
+  const BASE_STEP_MS = 300;
+
+  function startPlayback() {
     const total = getTotalSteps();
     if (total === 0) return;
     let v = parseInt(seqSlider.value);
     if (v >= total) v = 0;
     seqPlayBtn.textContent = '⏸';
+    const speed = parseFloat(seqSpeed?.value) || 1;
+    const stepMs = BASE_STEP_MS / speed;
     playTimer = setInterval(() => {
       v++;
       seqSlider.value = v;
-      setStepLimit(v >= total ? null : v);
+      playStep(v, stepMs * 0.9); // slide-in animation per revealed box
       updateSeqLabel();
       if (v >= total) stopPlayback();
-    }, 120);
+    }, stepMs);
+  }
+
+  seqPlayBtn?.addEventListener('click', () => {
+    if (playTimer) { stopPlayback(); return; }
+    startPlayback();
+  });
+
+  seqSpeed?.addEventListener('change', () => {
+    if (playTimer) { // re-pace mid-playback
+      clearInterval(playTimer);
+      playTimer = null;
+      startPlayback();
+    }
   });
 
   // ===== Exports =====

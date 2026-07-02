@@ -4,6 +4,7 @@ import {
   addCustomContainer, removeCustomContainer,
 } from './containers.js';
 import { t } from './i18n.js';
+import { toast, confirmDialog, openModal } from './toast.js';
 
 const STORAGE_KEY = 'clp:current';
 
@@ -60,9 +61,58 @@ export function init() {
   bindPresets();
   bindCargoForm();
   bindCsvImport();
+  bindDragDrop();
   bindActions();
   loadFromStorage();
   renderAll();
+}
+
+// ===== Drag & drop import (whole window, .csv / .json) =====
+function bindDragDrop() {
+  const overlay = document.createElement('div');
+  overlay.id = 'dropOverlay';
+  const hint = document.createElement('div');
+  hint.className = 'drop-hint';
+  hint.textContent = t('dropHint');
+  overlay.appendChild(hint);
+  document.body.appendChild(overlay);
+
+  let depth = 0; // dragenter/leave fire per child element — track nesting
+  window.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+    depth++;
+    hint.textContent = t('dropHint');
+    overlay.classList.add('active');
+  });
+  window.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault();
+  });
+  window.addEventListener('dragleave', (e) => {
+    if (!overlay.classList.contains('active')) return;
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) overlay.classList.remove('active');
+  });
+  window.addEventListener('drop', (e) => {
+    if (!overlay.classList.contains('active') && !e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    depth = 0;
+    overlay.classList.remove('active');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (!name.endsWith('.csv') && !name.endsWith('.json') && !name.endsWith('.txt')) {
+      toast(t('dropInvalidFile'), 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      if (name.endsWith('.json')) importJSONText(evt.target.result);
+      else openCsvPreview(evt.target.result);
+    };
+    reader.readAsText(file);
+  });
 }
 
 // ===== Container selection =====
@@ -128,7 +178,7 @@ function bindCustomContainerForm() {
     const height = parseFloat(document.getElementById('ccH').value);
     const payloadKg = parseFloat(document.getElementById('ccPayload').value);
     if (![length, width, height, payloadKg].every((v) => isFinite(v) && v > 0)) {
-      alert(t('invalidContainerInput'));
+      toast(t('invalidContainerInput'), 'error');
       return;
     }
     const c = addCustomContainer({ label, length, width, height, payloadKg });
@@ -140,10 +190,10 @@ function bindCustomContainerForm() {
     emit('changed');
     emit('containerChanged');
   });
-  document.getElementById('ccDeleteBtn')?.addEventListener('click', () => {
+  document.getElementById('ccDeleteBtn')?.addEventListener('click', async () => {
     const c = getContainer(state.containerId);
     if (!c || c.mode !== 'custom') return;
-    if (!confirm(t('confirmDeleteContainer'))) return;
+    if (!(await confirmDialog(t('confirmDeleteContainer'), { okLabel: t('ok'), cancelLabel: t('cancel') }))) return;
     removeCustomContainer(c.id);
     state.containerId = 'OCEAN_40HQ';
     rebuildContainerSelect();
@@ -218,7 +268,7 @@ function readCargoForm() {
 
   if (!isFinite(length) || !isFinite(width) || !isFinite(height) || !isFinite(quantity) ||
       length <= 0 || width <= 0 || height <= 0 || quantity <= 0) {
-    alert(t('inputValidPositive'));
+    toast(t('inputValidPositive'), 'error');
     return null;
   }
 
@@ -302,17 +352,7 @@ function bindCsvImport() {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const added = importCargoCSV(evt.target.result);
-        renderCargoList();
-        saveToStorage();
-        emit('changed');
-        alert(`${t('csvImportedPrefix')}${added}`);
-      } catch (err) {
-        alert(t('csvError') + err.message);
-      }
-    };
+    reader.onload = (evt) => { openCsvPreview(evt.target.result); };
     reader.readAsText(file);
     e.target.value = '';
   });
@@ -360,61 +400,160 @@ function parseCsvLine(line) {
   return cells.map((c) => c.trim());
 }
 
-function importCargoCSV(text) {
+/**
+ * Parse CSV text into candidate cargo rows with per-row validation.
+ * Never throws on bad rows — collects them so the preview can show
+ * exactly which lines will be skipped and why.
+ * @returns {{ rows: Array<{line:number, cargo:Object|null, error:string|null}> }}
+ */
+function parseCargoCSV(text) {
   const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 2) throw new Error('empty CSV');
+  if (lines.length < 2) throw new Error(t('csvNoValidRows'));
   const header = parseCsvLine(lines[0]).map((h) => h.toLowerCase().replace(/[\s-]+/g, '_'));
   const col = (row, name) => {
     const i = header.indexOf(name);
     return i >= 0 ? row[i] : undefined;
   };
   const palette = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'];
-  let added = 0;
+  const rows = [];
   for (let li = 1; li < lines.length; li++) {
     const row = parseCsvLine(lines[li]);
+    const line = li + 1;
     const length = parseFloat(col(row, 'length_cm') ?? col(row, 'length'));
     const width = parseFloat(col(row, 'width_cm') ?? col(row, 'width'));
     const height = parseFloat(col(row, 'height_cm') ?? col(row, 'height'));
     const quantity = parseInt(col(row, 'quantity') ?? '1');
-    if (![length, width, height].every((v) => isFinite(v) && v > 0) || !isFinite(quantity) || quantity <= 0) {
-      throw new Error(`row ${li + 1}`);
+    if (![length, width, height].every((v) => isFinite(v) && v > 0)) {
+      rows.push({ line, cargo: null, error: t('errDims'), name: col(row, 'name') || '' });
+      continue;
+    }
+    if (!isFinite(quantity) || quantity <= 0) {
+      rows.push({ line, cargo: null, error: t('errQty'), name: col(row, 'name') || '' });
+      continue;
     }
     const tsu = (col(row, 'this_side_up') ?? '1').toLowerCase();
-    state.cargoTypes.push({
-      id: `C${state.nextCargoId++}`,
-      name: col(row, 'name') || `Cargo ${state.nextCargoId}`,
-      length, width, height,
-      weightKg: parseFloat(col(row, 'weight_kg') ?? col(row, 'weight')) || 0,
-      quantity,
-      color: sanitizeColor(col(row, 'color'), palette[(state.nextCargoId - 1) % palette.length]),
-      rotatable: { yaw: true, pitch: false, roll: false },
-      thisSideUp: !(tsu === '0' || tsu === 'false' || tsu === 'no'),
-      maxStackLayers: parseInt(col(row, 'max_stack_layers')) || 99,
-      maxLoadOnTopKg: (() => {
-        const v = parseFloat(col(row, 'max_load_on_top_kg'));
-        return isFinite(v) ? v : Infinity;
-      })(),
-      supportRatioMin: 0.8,
-      groupSameSku: false,
-      priority: ['normal', 'urgent', 'lifo'].includes((col(row, 'priority') ?? '').toLowerCase())
-        ? col(row, 'priority').toLowerCase() : 'normal',
-      visible: true,
+    rows.push({
+      line,
+      error: null,
+      cargo: {
+        name: col(row, 'name') || `Cargo ${line}`,
+        length, width, height,
+        weightKg: parseFloat(col(row, 'weight_kg') ?? col(row, 'weight')) || 0,
+        quantity,
+        color: sanitizeColor(col(row, 'color'), palette[(li - 1) % palette.length]),
+        rotatable: { yaw: true, pitch: false, roll: false },
+        thisSideUp: !(tsu === '0' || tsu === 'false' || tsu === 'no'),
+        maxStackLayers: parseInt(col(row, 'max_stack_layers')) || 99,
+        maxLoadOnTopKg: (() => {
+          const v = parseFloat(col(row, 'max_load_on_top_kg'));
+          return isFinite(v) ? v : Infinity;
+        })(),
+        supportRatioMin: 0.8,
+        groupSameSku: false,
+        priority: ['normal', 'urgent', 'lifo'].includes((col(row, 'priority') ?? '').toLowerCase())
+          ? col(row, 'priority').toLowerCase() : 'normal',
+        visible: true,
+      },
     });
+  }
+  return { rows };
+}
+
+function commitCargoRows(rows) {
+  let added = 0;
+  for (const r of rows) {
+    if (!r.cargo) continue;
+    state.cargoTypes.push({ ...r.cargo, id: `C${state.nextCargoId++}` });
     added++;
   }
+  if (added > 0) {
+    renderCargoList();
+    saveToStorage();
+    emit('changed');
+  }
   return added;
+}
+
+/** Preview modal: parsed rows + per-row errors; commits only on confirm. */
+export function openCsvPreview(text) {
+  let parsed;
+  try {
+    parsed = parseCargoCSV(text);
+  } catch (err) {
+    toast(t('csvError') + err.message, 'error');
+    return;
+  }
+  const valid = parsed.rows.filter((r) => r.cargo);
+  const errors = parsed.rows.filter((r) => r.error);
+
+  const { body, footer, close } = openModal(t('csvPreviewTitle'));
+
+  const summary = document.createElement('div');
+  summary.className = 'csv-summary';
+  summary.textContent = `${t('csvValidCount')}: ${valid.length} ${t('rowsUnit')} · ${t('csvErrorCount')}: ${errors.length}`;
+  body.appendChild(summary);
+
+  const scroll = document.createElement('div');
+  scroll.className = 'csv-preview-scroll';
+  const table = document.createElement('table');
+  table.className = 'csv-preview-table';
+  const thead = document.createElement('thead');
+  thead.innerHTML = `<tr><th>${t('csvColRow')}</th><th>${t('name')}</th><th>${t('csvColDims')}</th><th>${t('quantity')}</th><th>${t('weightKg')}</th><th>${t('csvColError')}</th></tr>`;
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for (const r of parsed.rows) {
+    const tr = document.createElement('tr');
+    if (r.error) tr.className = 'row-error';
+    const c = r.cargo;
+    tr.innerHTML = `
+      <td>${r.line}</td>
+      <td>${escapeHtml(c ? c.name : r.name)}</td>
+      <td>${c ? `${c.length}×${c.width}×${c.height}` : '—'}</td>
+      <td>${c ? c.quantity : '—'}</td>
+      <td>${c ? c.weightKg : '—'}</td>
+      <td>${r.error ? escapeHtml(r.error) : '✓'}</td>`;
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  scroll.appendChild(table);
+  body.appendChild(scroll);
+
+  if (errors.length) {
+    const note = document.createElement('div');
+    note.className = 'csv-error-note';
+    note.textContent = `⚠ ${t('csvErrorCount')}: ${errors.length} ${t('rowsUnit')}`;
+    body.appendChild(note);
+  }
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn-cancel';
+  cancelBtn.textContent = t('cancel');
+  cancelBtn.addEventListener('click', close);
+
+  const importBtn = document.createElement('button');
+  importBtn.className = 'btn-primary';
+  importBtn.textContent = `${t('importAction')} ${valid.length} ${t('rowsUnit')}`;
+  importBtn.disabled = valid.length === 0;
+  importBtn.addEventListener('click', () => {
+    const added = commitCargoRows(parsed.rows);
+    close();
+    toast(`${t('csvImportedPrefix')}${added}`, 'success');
+  });
+  footer.append(cancelBtn, importBtn);
 }
 
 // ===== Top bar actions =====
 function bindActions() {
   document.getElementById('packBtn').addEventListener('click', () => emit('pack'));
-  document.getElementById('clearBtn').addEventListener('click', () => {
-    if (state.cargoTypes.length && !confirm(t('confirmClear'))) return;
+  document.getElementById('clearBtn').addEventListener('click', async () => {
+    if (state.cargoTypes.length &&
+        !(await confirmDialog(t('confirmClear'), { okLabel: t('ok'), cancelLabel: t('cancel') }))) return;
     state.cargoTypes = [];
     setEditMode(null);
     renderCargoList();
     saveToStorage();
     emit('changed');
+    toast(t('clearedOk'), 'success');
   });
   document.getElementById('exportBtn').addEventListener('click', exportJSON);
   document.getElementById('importBtn').addEventListener('click', () => {
@@ -704,38 +843,51 @@ function exportJSON() {
   URL.revokeObjectURL(url);
 }
 
+/** Apply an imported plan object (JSON import / demo data) to the state in place. */
+export function applyImportedData(data) {
+  if (Array.isArray(data.customContainers)) {
+    for (const cc of data.customContainers) {
+      if (cc?.internal && !getContainer(cc.id)) {
+        addCustomContainer({
+          id: cc.id,
+          label: cc.label,
+          length: cc.internal.length,
+          width: cc.internal.width,
+          height: cc.internal.height,
+          payloadKg: cc.payloadKg,
+        });
+      }
+    }
+  }
+  if (data.containerId) state.containerId = data.containerId;
+  if (Array.isArray(data.cargoTypes)) state.cargoTypes = data.cargoTypes.map(normalizeCargo).filter(Boolean);
+  if (data.nextCargoId) state.nextCargoId = data.nextCargoId;
+  if (typeof data.metadata?.title === 'string') state.planTitle = data.metadata.title;
+  setEditMode(null);
+  renderAll();
+  saveToStorage();
+  emit('changed');
+}
+
+/** Parse JSON text, confirm overwrite, then apply. Shared by file input + drag-drop. */
+export async function importJSONText(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    toast(t('jsonError') + err.message, 'error');
+    return;
+  }
+  if (!(await confirmDialog(t('confirmOverwrite'), { okLabel: t('ok'), cancelLabel: t('cancel') }))) return;
+  applyImportedData(data);
+  toast(t('importedOk'), 'success');
+}
+
 function importJSON(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = (evt) => {
-    try {
-      const data = JSON.parse(evt.target.result);
-      if (!confirm(t('confirmOverwrite'))) return;
-      if (Array.isArray(data.customContainers)) {
-        for (const cc of data.customContainers) {
-          if (cc?.internal && !getContainer(cc.id)) {
-            addCustomContainer({
-              id: cc.id,
-              label: cc.label,
-              length: cc.internal.length,
-              width: cc.internal.width,
-              height: cc.internal.height,
-              payloadKg: cc.payloadKg,
-            });
-          }
-        }
-      }
-      if (data.containerId) state.containerId = data.containerId;
-      if (Array.isArray(data.cargoTypes)) state.cargoTypes = data.cargoTypes.map(normalizeCargo).filter(Boolean);
-      if (typeof data.metadata?.title === 'string') state.planTitle = data.metadata.title;
-      renderAll();
-      saveToStorage();
-      emit('changed');
-    } catch (err) {
-      alert(t('jsonError') + err.message);
-    }
-  };
+  reader.onload = (evt) => { importJSONText(evt.target.result); };
   reader.readAsText(file);
   e.target.value = '';
 }

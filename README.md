@@ -71,6 +71,8 @@ name, length_cm, width_cm, height_cm, weight_kg, quantity, color, max_stack_laye
 .
 ├── index.html              # 入口（含 three.js import map）
 ├── SDD.md                  # 系統設計文件
+├── docs/
+│   └── ALGORITHM_REVIEW.md # 堆疊演算法評估報告（正確性/效能/測試缺口）
 ├── package.json
 ├── serve.py                # 開發伺服器（no-cache）
 ├── vendor/

@@ -1,7 +1,5 @@
 // Demo dataset — for one-click sample loading
 
-const STORAGE_KEY = 'clp:current';
-
 const DEMO = {
   containerId: 'OCEAN_40HQ',
   nextCargoId: 4,
@@ -33,6 +31,7 @@ const DEMO = {
   ],
 };
 
-export function loadDemo() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(DEMO));
+/** Deep-cloned demo plan, in the same shape applyImportedData() accepts. */
+export function getDemoData() {
+  return JSON.parse(JSON.stringify(DEMO));
 }

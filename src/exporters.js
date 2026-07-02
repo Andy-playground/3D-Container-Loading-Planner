@@ -3,6 +3,7 @@
 // CJK text and colors render correctly without bundling a CJK font.
 
 import { t, getLang } from './i18n.js';
+import { toast } from './toast.js';
 
 function tsForFilename() {
   const d = new Date();
@@ -48,7 +49,7 @@ function fmtReasons(u) {
 // ===== TXT =====
 export function exportTXT(result, containerSpec, meta = {}) {
   if (!result?.containers?.length) {
-    alert(t('addAtLeastOne'));
+    toast(t('addAtLeastOne'), 'error');
     return;
   }
   const lines = [];
@@ -106,7 +107,7 @@ function csvCell(v) {
 
 export function exportCSV(result, containerSpec, meta = {}) {
   if (!result?.containers?.length) {
-    alert(t('addAtLeastOne'));
+    toast(t('addAtLeastOne'), 'error');
     return;
   }
   const rows = [];
@@ -138,12 +139,12 @@ export function exportCSV(result, containerSpec, meta = {}) {
 // ===== PDF (via print) =====
 export function exportPDF(result, containerSpec, meta = {}) {
   if (!result?.containers?.length) {
-    alert(t('addAtLeastOne'));
+    toast(t('addAtLeastOne'), 'error');
     return;
   }
   const win = window.open('', '_blank');
   if (!win) {
-    alert('Popup blocked — please allow popups to export PDF.');
+    toast('Popup blocked — please allow popups to export PDF.', 'error');
     return;
   }
 
