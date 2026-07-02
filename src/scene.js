@@ -7,10 +7,12 @@ import { OrbitControls } from '../vendor/OrbitControls.js';
 
 let scene, camera, renderer, controls;
 let groundGroup;          // floor + grid (resized per render)
-let containerGroup;       // wireframe + door indicator
+let containerGroup;       // container shell + doors + labels
 let boxesGroup;           // all rendered boxes
 let cogGroup;             // center-of-gravity markers + axle indicators
 let canvasEl;
+let dirLight;             // shadow-casting key light (refit per render)
+let boxShadows = true;    // disabled automatically on very large plans
 let opacity = 1.0;
 let labelsVisible = true;
 let cogVisible = true;
@@ -25,11 +27,22 @@ const GAP_BETWEEN_CONTAINERS = 200; // cm, in world units
 const boxClickListeners = [];
 export function onBoxClick(fn) { boxClickListeners.push(fn); }
 
+// Listeners for box hover events: fn(placement|null, clientX, clientY)
+const boxHoverListeners = [];
+export function onBoxHover(fn) { boxHoverListeners.push(fn); }
+
+// Slide-in tweens for loading-sequence playback
+const activeTweens = [];
+function cancelTweens() {
+  for (const tw of activeTweens) tw.g.position.set(0, 0, 0);
+  activeTweens.length = 0;
+}
+
 export function initScene(canvasContainerEl) {
   canvasEl = canvasContainerEl;
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xeeeeee);
+  scene.background = new THREE.Color(0xdfe7ef);
 
   const w = canvasEl.clientWidth;
   const h = canvasEl.clientHeight;
@@ -39,6 +52,8 @@ export function initScene(canvasContainerEl) {
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(w, h);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   canvasEl.appendChild(renderer.domElement);
 
   controls = new OrbitControls(camera, renderer.domElement);
@@ -46,10 +61,15 @@ export function initScene(canvasContainerEl) {
   controls.dampingFactor = 0.08;
   controls.zoomSpeed = 2.0;
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.7);
-  dir.position.set(500, 800, 600);
-  scene.add(dir);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xb8c4cc, 0.9));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+  dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+  dirLight.position.set(500, 900, 700);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.set(2048, 2048);
+  dirLight.shadow.bias = -0.0005;
+  scene.add(dirLight);
+  scene.add(dirLight.target);
 
   groundGroup = new THREE.Group();
   scene.add(groundGroup);
@@ -65,6 +85,11 @@ export function initScene(canvasContainerEl) {
     dragStart = { x: e.clientX, y: e.clientY };
   });
   renderer.domElement.addEventListener('click', onCanvasClick);
+  renderer.domElement.addEventListener('pointermove', onCanvasPointerMove);
+  renderer.domElement.addEventListener('pointerleave', () => {
+    hoverEvent = null;
+    notifyHover(null, 0, 0);
+  });
   animate();
 
   // Debug hook
@@ -74,6 +99,33 @@ export function initScene(canvasContainerEl) {
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 let dragStart = null;
+let hoverEvent = null;        // latest pointermove, raycast once per frame
+let lastHoverPlacement = null;
+
+function onCanvasPointerMove(event) {
+  hoverEvent = { clientX: event.clientX, clientY: event.clientY, buttons: event.buttons };
+}
+
+function notifyHover(placement, x, y) {
+  if (placement === lastHoverPlacement && placement === null) return;
+  lastHoverPlacement = placement;
+  renderer.domElement.style.cursor = placement ? 'pointer' : '';
+  boxHoverListeners.forEach((fn) => fn(placement, x, y));
+}
+
+function processHover() {
+  if (!hoverEvent) return;
+  const ev = hoverEvent;
+  hoverEvent = null;
+  if (ev.buttons) { notifyHover(null, 0, 0); return; } // orbiting — no tooltip
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  ndc.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObjects(boxesGroup.children, true);
+  const hit = hits.find((h) => h.object.isMesh && h.object.userData.placement && h.object.parent?.visible !== false);
+  notifyHover(hit ? hit.object.userData.placement : null, ev.clientX, ev.clientY);
+}
 function onCanvasClick(event) {
   // Skip if pointer dragged (orbit), only handle simple clicks
   if (dragStart && Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y) > 5) {
@@ -121,6 +173,20 @@ function onResize() {
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
+  processHover();
+  if (activeTweens.length) {
+    const now = performance.now();
+    for (let i = activeTweens.length - 1; i >= 0; i--) {
+      const tw = activeTweens[i];
+      const t = Math.min(1, (now - tw.start) / tw.duration);
+      const e = 1 - Math.pow(1 - t, 3); // ease-out cubic
+      tw.g.position.set(tw.from.x * (1 - e), tw.from.y * (1 - e), tw.from.z * (1 - e));
+      if (t >= 1) {
+        tw.g.position.set(0, 0, 0);
+        activeTweens.splice(i, 1);
+      }
+    }
+  }
   renderer.render(scene, camera);
 }
 
@@ -137,6 +203,11 @@ export function renderResult(result, containerSpec) {
   const count = Math.max(containers.length, 1);
   const totalLen = count * containerSpec.internal.length + (count - 1) * GAP_BETWEEN_CONTAINERS;
   const maxW = containerSpec.internal.width;
+
+  // Per-box shadows get expensive on very large plans — keep the key light
+  // but stop boxes from casting beyond this threshold.
+  boxShadows = totalSteps <= 500;
+  fitShadowCamera(totalLen, maxW, containerSpec.internal.height);
 
   drawGround(totalLen, maxW);
 
@@ -218,6 +289,7 @@ export function setCOGVisible(v) {
 }
 
 function clearAll() {
+  cancelTweens();
   disposeGroup(groundGroup);
   disposeGroup(containerGroup);
   disposeGroup(boxesGroup);
@@ -248,6 +320,19 @@ function disposeObj(obj) {
   }
 }
 
+// Fit the directional light's orthographic shadow frustum to the laid-out containers.
+function fitShadowCamera(totalLen, maxW, maxH) {
+  if (!dirLight) return;
+  dirLight.position.set(totalLen / 2 + 400, Math.max(900, maxH * 3.5), maxW / 2 + 700);
+  dirLight.target.position.set(totalLen / 2, 0, maxW / 2);
+  dirLight.target.updateMatrixWorld();
+  const s = Math.max(totalLen, maxW * 3, 800) * 0.75;
+  const c = dirLight.shadow.camera;
+  c.left = -s; c.right = s; c.top = s; c.bottom = -s;
+  c.near = 10; c.far = 8000;
+  c.updateProjectionMatrix();
+}
+
 // ===== Ground (floor + grid) =====
 function drawGround(totalLen, maxW) {
   const sizeX = totalLen + 600;
@@ -257,10 +342,11 @@ function drawGround(totalLen, maxW) {
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(sizeX, sizeZ),
-    new THREE.MeshStandardMaterial({ color: 0xdcdcdc, side: THREE.DoubleSide })
+    new THREE.MeshStandardMaterial({ color: 0xd3dae1, side: THREE.DoubleSide, roughness: 0.95 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(centerX, -0.5, centerZ);
+  floor.receiveShadow = true;
   groundGroup.add(floor);
 
   const gridDivX = Math.max(20, Math.round(sizeX / 50));
@@ -269,54 +355,209 @@ function drawGround(totalLen, maxW) {
   groundGroup.add(grid);
 }
 
-// ===== Container frame + door =====
+// ===== Container: realistic shell (corrugated walls, plywood floor, swing doors) =====
+
+const CONTAINER_PAINT = '#3f6c94';       // corrugated steel paint
+const CONTAINER_PAINT_DARK = '#33587a';  // corrugation shadow
+const CONTAINER_TRIM = '#2c3e50';        // corner posts / rails
+
+// Corrugated steel: vertical trapezoid profile, drawn as repeating light/dark bands.
+// One canvas tile covers ~2 corrugation pitches (~60 cm); repeatX scales per wall.
+function makeCorrugatedTexture(repeatX, repeatY = 1, base = CONTAINER_PAINT, dark = CONTAINER_PAINT_DARK) {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 128, 128);
+  const pitch = 32;
+  for (let x = 0; x < 128; x += pitch) {
+    let g = ctx.createLinearGradient(x, 0, x + pitch, 0);
+    g.addColorStop(0.0, base);
+    g.addColorStop(0.18, 'rgba(255,255,255,0.28)'); // lit flank
+    g.addColorStop(0.38, base);
+    g.addColorStop(0.62, dark);                     // recessed groove
+    g.addColorStop(0.85, dark);
+    g.addColorStop(1.0, base);
+    ctx.fillStyle = g;
+    ctx.fillRect(x, 0, pitch, 128);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(Math.max(1, Math.round(repeatX)), repeatY);
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+// Plywood floor: warm planks with grain streaks and seams.
+function makeFloorTexture(repeatX, repeatY) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#a08154';
+  ctx.fillRect(0, 0, 256, 256);
+  // grain streaks
+  for (let i = 0; i < 90; i++) {
+    const y = Math.random() * 256;
+    const alpha = 0.05 + Math.random() * 0.10;
+    ctx.strokeStyle = Math.random() > 0.5 ? `rgba(70,45,20,${alpha})` : `rgba(230,200,150,${alpha})`;
+    ctx.lineWidth = 1 + Math.random() * 2;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.bezierCurveTo(85, y + (Math.random() - 0.5) * 14, 170, y + (Math.random() - 0.5) * 14, 256, y);
+    ctx.stroke();
+  }
+  // plank seams
+  ctx.strokeStyle = 'rgba(60,40,20,0.55)';
+  ctx.lineWidth = 2;
+  for (let y = 0; y <= 256; y += 64) {
+    ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(256, y + 0.5); ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(Math.max(1, Math.round(repeatX)), Math.max(1, Math.round(repeatY)));
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+// Door leaf: painted panel with lock rods, keepers and a handle.
+function makeDoorTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#46759e';
+  ctx.fillRect(0, 0, 128, 256);
+  // subtle horizontal door corrugation
+  for (let y = 0; y < 256; y += 32) {
+    const g = ctx.createLinearGradient(0, y, 0, y + 32);
+    g.addColorStop(0, 'rgba(255,255,255,0.10)');
+    g.addColorStop(0.5, 'rgba(0,0,0,0.10)');
+    g.addColorStop(1, 'rgba(255,255,255,0.06)');
+    ctx.fillStyle = g;
+    ctx.fillRect(6, y, 116, 32);
+  }
+  // frame
+  ctx.strokeStyle = 'rgba(20,35,50,0.7)';
+  ctx.lineWidth = 5;
+  ctx.strokeRect(3, 3, 122, 250);
+  // two vertical lock rods with keeper brackets
+  for (const x of [38, 90]) {
+    ctx.fillStyle = '#c8d2da';
+    ctx.fillRect(x - 3, 8, 6, 240);
+    ctx.fillStyle = '#8a99a6';
+    for (const y of [26, 120, 214]) ctx.fillRect(x - 6, y, 12, 14);
+    // handle
+    ctx.fillStyle = '#dde5eb';
+    ctx.fillRect(x - 14, 150, 14, 6);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
 function drawContainerFrame(spec, offsetX) {
   const { length: L, width: W, height: H } = spec.internal;
 
-  // Wireframe
-  const geom = new THREE.BoxGeometry(L, H, W);
-  const edges = new THREE.EdgesGeometry(geom);
-  const wire = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x333333 }));
-  wire.position.set(offsetX + L / 2, H / 2, W / 2);
-  containerGroup.add(wire);
-  geom.dispose();
-
-  // Door = +X end (red translucent panel + thick red frame + label)
-  const doorGeom = new THREE.PlaneGeometry(W, H);
-  const doorMat = new THREE.MeshBasicMaterial({
-    color: 0xff4444,
-    transparent: true,
-    opacity: 0.18,
-    side: THREE.DoubleSide,
+  // --- Shell: single box with BackSide materials. Faces are rendered only
+  // from the inside, so whichever wall faces the camera is culled and the
+  // cargo stays visible from every orbit angle (dollhouse view).
+  const shellGeom = new THREE.BoxGeometry(L, H, W);
+  const steelMat = (map) => new THREE.MeshStandardMaterial({
+    map, side: THREE.BackSide, roughness: 0.75, metalness: 0.25,
   });
-  const doorPanel = new THREE.Mesh(doorGeom, doorMat);
-  doorPanel.rotation.y = Math.PI / 2;
-  doorPanel.position.set(offsetX + L, H / 2, W / 2);
-  containerGroup.add(doorPanel);
+  const sideTexA = makeCorrugatedTexture(L / 60);
+  const sideTexB = makeCorrugatedTexture(L / 60);
+  const backTex = makeCorrugatedTexture(W / 60);
+  const roofTex = makeCorrugatedTexture(L / 60, 1, '#7d8f9e', '#6a7b89');
+  const floorMat = new THREE.MeshStandardMaterial({
+    map: makeFloorTexture(L / 120, W / 120), side: THREE.BackSide, roughness: 0.9, metalness: 0,
+  });
+  const openEnd = new THREE.MeshBasicMaterial({ visible: false }); // door opening at +X
+  const shell = new THREE.Mesh(shellGeom, [
+    openEnd,             // +x (door end — left open)
+    steelMat(backTex),   // -x back wall
+    steelMat(roofTex),   // +y roof
+    floorMat,            // -y floor (plywood, seen from above)
+    steelMat(sideTexA),  // +z side
+    steelMat(sideTexB),  // -z side
+  ]);
+  shell.position.set(offsetX + L / 2, H / 2, W / 2);
+  shell.receiveShadow = true;
+  containerGroup.add(shell);
 
-  const doorEdges = new THREE.EdgesGeometry(doorGeom);
-  const doorWire = new THREE.LineSegments(
-    doorEdges,
-    new THREE.LineBasicMaterial({ color: 0xcc0000, linewidth: 2 })
+  // Outline keeps the silhouette readable from culled sides
+  const edges = new THREE.EdgesGeometry(shellGeom);
+  const wire = new THREE.LineSegments(
+    edges,
+    new THREE.LineBasicMaterial({ color: 0x2c3e50, transparent: true, opacity: 0.55 })
   );
-  doorWire.rotation.y = Math.PI / 2;
-  doorWire.position.set(offsetX + L, H / 2, W / 2);
-  containerGroup.add(doorWire);
-  doorGeom.dispose();
+  wire.position.copy(shell.position);
+  containerGroup.add(wire);
 
-  // Door label sprite above door
+  // --- Corner posts + top/bottom rails (exterior trim)
+  const trimMat = new THREE.MeshStandardMaterial({ color: CONTAINER_TRIM, roughness: 0.6, metalness: 0.4 });
+  const post = new THREE.BoxGeometry(10, H + 8, 10);
+  for (const [px, pz] of [[0, 0], [0, W], [L, 0], [L, W]]) {
+    const m = new THREE.Mesh(post, trimMat);
+    m.position.set(offsetX + px, H / 2, pz);
+    m.castShadow = true;
+    containerGroup.add(m);
+  }
+  const railX = new THREE.BoxGeometry(L, 8, 8);
+  for (const [py, pz] of [[0, 0], [0, W], [H, 0], [H, W]]) {
+    const m = new THREE.Mesh(railX, trimMat);
+    m.position.set(offsetX + L / 2, py, pz);
+    containerGroup.add(m);
+  }
+  const railZ = new THREE.BoxGeometry(8, 8, W);
+  for (const [px, py] of [[0, 0], [0, H], [L, 0], [L, H]]) {
+    const m = new THREE.Mesh(railZ, trimMat);
+    m.position.set(offsetX + px, py, W / 2);
+    containerGroup.add(m);
+  }
+
+  // --- Swing doors at +X, hinged on the corner posts, opened ~110° outward
+  // so the interior stays visible from the door end.
+  const leafW = W / 2 - 3;
+  const leafGeom = new THREE.BoxGeometry(4, H - 6, leafW);
+  const doorFace = makeDoorTexture();
+  const doorEdge = new THREE.MeshStandardMaterial({ color: '#3a627f', roughness: 0.7, metalness: 0.3 });
+  const doorMat = [
+    new THREE.MeshStandardMaterial({ map: doorFace, roughness: 0.7, metalness: 0.3 }),
+    new THREE.MeshStandardMaterial({ map: doorFace, roughness: 0.7, metalness: 0.3 }),
+    doorEdge, doorEdge, doorEdge, doorEdge,
+  ];
+  const OPEN_ANGLE = THREE.MathUtils.degToRad(110);
+
+  const leftHinge = new THREE.Group();
+  leftHinge.position.set(offsetX + L + 2, H / 2, 0);
+  const leftLeaf = new THREE.Mesh(leafGeom, doorMat);
+  leftLeaf.position.set(0, 0, leafW / 2);
+  leftLeaf.castShadow = true;
+  leftHinge.add(leftLeaf);
+  leftHinge.rotation.y = OPEN_ANGLE;
+  containerGroup.add(leftHinge);
+
+  const rightHinge = new THREE.Group();
+  rightHinge.position.set(offsetX + L + 2, H / 2, W);
+  const rightLeaf = new THREE.Mesh(leafGeom, doorMat);
+  rightLeaf.position.set(0, 0, -leafW / 2);
+  rightLeaf.castShadow = true;
+  rightHinge.add(rightLeaf);
+  rightHinge.rotation.y = -OPEN_ANGLE;
+  containerGroup.add(rightHinge);
+
+  // --- Door / back labels
   const label = makeTextSprite('🚪 DOOR', {
     fontSize: 56,
     bgColor: '#cc0000',
     textColor: '#ffffff',
     padding: 14,
   });
-  const labelHeight = 50;
+  const labelHeight = 44;
   label.scale.set(label.userData.aspectRatio * labelHeight, labelHeight, 1);
   label.position.set(offsetX + L + 20, H + 35, W / 2);
   containerGroup.add(label);
 
-  // "BACK" label at -X end (lighter)
   const backLabel = makeTextSprite('BACK', {
     fontSize: 44,
     bgColor: '#888888',
@@ -374,6 +615,8 @@ function drawBox(p, offsetX) {
   ];
   const mesh = new THREE.Mesh(geom, materials);
   mesh.position.set(offsetX + p.x + p.L / 2, p.z + p.H / 2, p.y + p.W / 2);
+  mesh.castShadow = boxShadows;
+  mesh.receiveShadow = true;
   mesh.userData.placement = { ...p, worldX: mesh.position.x, worldY: mesh.position.y, worldZ: mesh.position.z };
 
   // Outline
@@ -416,10 +659,33 @@ export function setCargoVisibility(cargoId, visible) {
   applyBoxVisibility();
 }
 
-/** Loading-sequence playback: show only boxes with loadSeq ≤ n (null = all). */
+/** Loading-sequence playback: show only boxes with loadSeq ≤ n (null = all). Instant (scrub). */
 export function setStepLimit(n) {
+  cancelTweens();
   stepLimit = (n === null || n === undefined) ? null : Math.max(0, Math.floor(n));
   applyBoxVisibility();
+}
+
+/**
+ * Animated playback step: reveal step n with the box sliding in from the
+ * door side (+X, elevated). Scrubbing still uses setStepLimit (instant).
+ */
+export function playStep(n, durationMs = 260) {
+  stepLimit = Math.max(0, Math.floor(n));
+  applyBoxVisibility();
+  for (const g of boxesGroup.children) {
+    if (!g.isGroup || g.userData.loadSeq !== stepLimit || !g.visible) continue;
+    // Restart any in-flight tween for this group
+    const idx = activeTweens.findIndex((tw) => tw.g === g);
+    if (idx >= 0) activeTweens.splice(idx, 1);
+    activeTweens.push({
+      g,
+      from: { x: 320, y: 160, z: 0 },
+      start: performance.now(),
+      duration: durationMs,
+    });
+    g.position.set(320, 160, 0);
+  }
 }
 
 export function getTotalSteps() {

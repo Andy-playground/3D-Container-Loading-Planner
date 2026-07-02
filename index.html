@@ -189,9 +189,16 @@
       <div id="canvas"></div>
       <div id="seqBar" style="display:none">
         <button id="seqPlayBtn" title="Play">▶</button>
+        <select id="seqSpeed" data-i18n-title="seqSpeedTitle">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+        </select>
         <input type="range" id="seqSlider" min="0" max="0" value="0">
         <span id="seqLabel"></span>
       </div>
+      <div id="sceneTooltip"></div>
       <div id="detailsPanel" style="display:none">
         <div id="detailsHeader">
           <span data-i18n="cargoDetails">貨物明細</span>
@@ -202,6 +209,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/app.js?v=7"></script>
+  <script type="module" src="src/app.js?v=8"></script>
 </body>
 </html>
