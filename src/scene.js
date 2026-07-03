@@ -255,14 +255,6 @@ function drawCOGMarker(cog, containerSpec, offsetX) {
   line.userData.kind = 'cog';
   cogGroup.add(line);
 
-  // Label "COG"
-  const label = makeTextSprite('⊕ COG', { fontSize: 36, bgColor: '#ff8800', textColor: '#ffffff', padding: 8 });
-  const lh = 28;
-  label.scale.set(label.userData.aspectRatio * lh, lh, 1);
-  label.position.set(offsetX + cog.x, cog.z + 30, cog.y);
-  label.userData.kind = 'cog';
-  cogGroup.add(label);
-
   cogGroup.visible = cogVisible;
 }
 
@@ -545,28 +537,6 @@ function drawContainerFrame(spec, offsetX) {
   rightHinge.add(rightLeaf);
   rightHinge.rotation.y = -OPEN_ANGLE;
   containerGroup.add(rightHinge);
-
-  // --- Door / back labels
-  const label = makeTextSprite('🚪 DOOR', {
-    fontSize: 56,
-    bgColor: '#cc0000',
-    textColor: '#ffffff',
-    padding: 14,
-  });
-  const labelHeight = 44;
-  label.scale.set(label.userData.aspectRatio * labelHeight, labelHeight, 1);
-  label.position.set(offsetX + L + 20, H + 35, W / 2);
-  containerGroup.add(label);
-
-  const backLabel = makeTextSprite('BACK', {
-    fontSize: 44,
-    bgColor: '#888888',
-    textColor: '#ffffff',
-    padding: 10,
-  });
-  backLabel.scale.set(backLabel.userData.aspectRatio * 32, 32, 1);
-  backLabel.position.set(offsetX - 20, H + 25, W / 2);
-  containerGroup.add(backLabel);
 }
 
 // ===== Box rendering =====
@@ -817,55 +787,6 @@ function colorLuminance(hex) {
   const g = parseInt(hex.slice(2, 4), 16) / 255;
   const b = parseInt(hex.slice(4, 6), 16) / 255;
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-// ===== Text sprite helper =====
-function makeTextSprite(text, opts = {}) {
-  const {
-    fontSize = 48,
-    bgColor = 'rgba(0,0,0,0)',
-    textColor = '#000000',
-    padding = 8,
-  } = opts;
-
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  ctx.font = `bold ${fontSize}px sans-serif`;
-  const metrics = ctx.measureText(text);
-  canvas.width = Math.ceil(metrics.width + padding * 2);
-  canvas.height = Math.ceil(fontSize * 1.3 + padding * 2);
-
-  ctx.font = `bold ${fontSize}px sans-serif`;
-  if (bgColor !== 'rgba(0,0,0,0)') {
-    ctx.fillStyle = bgColor;
-    roundRect(ctx, 0, 0, canvas.width, canvas.height, 12);
-    ctx.fill();
-  }
-  ctx.fillStyle = textColor;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
-  const sprite = new THREE.Sprite(mat);
-  sprite.userData.aspectRatio = canvas.width / canvas.height;
-  return sprite;
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
 }
 
 function frameCamera(spec, containerCount) {

@@ -162,81 +162,163 @@ export function exportPDF(result, containerSpec, meta = {}) {
   };
 }
 
+// Report layout: header-level overview → one line per cargo type
+// (boxes / weight / CBM / applied loading options) → 3D snapshot last.
 function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 
-  const containerSections = result.containers.map((ct, i) => {
-    // Per-cargo summary table for this container
-    const summaryMap = new Map();
+  // --- Aggregates across all containers
+  const placedBy = new Map();   // cargoId -> count
+  let totalWeight = 0;
+  let totalCbm = 0;
+  for (const ct of result.containers) {
     for (const p of ct.placements) {
-      const e = summaryMap.get(p.cargoId) ?? { name: p.name, color: p.color, count: 0, weightKg: 0 };
-      e.count++;
-      e.weightKg += p.weightKg ?? 0;
-      summaryMap.set(p.cargoId, e);
+      placedBy.set(p.cargoId, (placedBy.get(p.cargoId) ?? 0) + 1);
+      totalWeight += p.weightKg ?? 0;
+      totalCbm += (p.L * p.W * p.H) / 1e6;
     }
-    const summaryRows = Array.from(summaryMap.values()).map((e) => `
+  }
+  const unplacedBy = new Map((result.unplaced ?? []).map((u) => [u.cargoId, u]));
+  const totalUnplaced = (result.unplaced ?? []).reduce((s, u) => s + u.count, 0);
+  const avgUtil = result.containers.length
+    ? result.containers.reduce((s, ct) => s + ct.stats.volumeUtilization, 0) / result.containers.length
+    : 0;
+
+  // --- Header level: overview
+  const overviewHtml = `
+    <section>
+      <h2>${t('overview')}</h2>
+      <table class="overview">
+        <tbody>
+          <tr>
+            <th>${t('chooseContainer')}</th><td>${esc(containerSpec.label)}${meta.autoChosen ? ` (${t('autoChosen')})` : ''}</td>
+            <th>${t('totalContainers')}</th><td>${result.containers.length}</td>
+          </tr>
+          <tr>
+            <th>${t('totalItems')}</th><td>${totalItems}${totalUnplaced ? ` <span class="warn">(+${totalUnplaced} ${t('unplacedShort')})</span>` : ''}</td>
+            <th>${t('avgUtil')}</th><td>${(avgUtil * 100).toFixed(1)}%</td>
+          </tr>
+          <tr>
+            <th>${t('totalWeightKg')}</th><td>${totalWeight.toFixed(0)}</td>
+            <th>${t('totalCbm')}</th><td>${totalCbm.toFixed(2)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>`;
+
+  // --- Line level: one row per cargo type
+  const optBadges = (c) => {
+    const o = [];
+    if (c.thisSideUp) o.push(t('optThisSideUp'));
+    if ((c.maxStackLayers ?? 99) === 1) o.push(t('optNoStack'));
+    if (c.rotatable?.yaw) o.push(t('optYaw'));
+    if (c.rotatable?.pitch || c.rotatable?.roll) o.push(t('optFlip'));
+    if (c.priority === 'urgent') o.push(t('optUrgent'));
+    if (c.priority === 'lifo') o.push(t('optLifo'));
+    if (c.groupSameSku) o.push(t('optGroup'));
+    return o.map((x) => `<span class="opt">${esc(x)}</span>`).join(' ');
+  };
+
+  // Prefer the full cargo definitions (passed via meta); fall back to
+  // reconstructing basic rows from placements if unavailable.
+  let cargoRows = '';
+  if (Array.isArray(meta.cargoTypes) && meta.cargoTypes.length) {
+    cargoRows = meta.cargoTypes.map((c) => {
+      const placed = placedBy.get(c.id) ?? 0;
+      const un = unplacedBy.get(c.id)?.count ?? 0;
+      const cbm = (c.length * c.width * c.height * placed) / 1e6;
+      return `
+        <tr>
+          <td><span class="sw" style="background:${esc(c.color || '#888')}"></span>${esc(c.name)}</td>
+          <td>${c.length}×${c.width}×${c.height}</td>
+          <td>${c.weightKg ?? 0}</td>
+          <td>${placed}${un ? ` <span class="warn">(+${un} ${t('unplacedShort')})</span>` : ''}</td>
+          <td>${((c.weightKg ?? 0) * placed).toFixed(0)}</td>
+          <td>${cbm.toFixed(2)}</td>
+          <td>${optBadges(c)}</td>
+        </tr>`;
+    }).join('');
+  } else {
+    const byType = new Map();
+    for (const ct of result.containers) {
+      for (const p of ct.placements) {
+        const e = byType.get(p.cargoId) ?? { name: p.name, color: p.color, count: 0, weightKg: 0, cbm: 0, sample: p };
+        e.count++;
+        e.weightKg += p.weightKg ?? 0;
+        e.cbm += (p.L * p.W * p.H) / 1e6;
+        byType.set(p.cargoId, e);
+      }
+    }
+    cargoRows = Array.from(byType.values()).map((e) => `
       <tr>
         <td><span class="sw" style="background:${esc(e.color || '#888')}"></span>${esc(e.name)}</td>
+        <td>${e.sample.L}×${e.sample.W}×${e.sample.H}</td>
+        <td>${e.sample.weightKg ?? 0}</td>
         <td>${e.count}</td>
         <td>${e.weightKg.toFixed(0)}</td>
-      </tr>
-    `).join('');
+        <td>${e.cbm.toFixed(2)}</td>
+        <td>${e.sample.thisSideUp ? `<span class="opt">${t('optThisSideUp')}</span>` : ''}</td>
+      </tr>`).join('');
+  }
 
-    const ordered = [...ct.placements].sort((a, b) => (a.loadSeq ?? 0) - (b.loadSeq ?? 0));
-    const rows = ordered.map((p) => `
-      <tr>
-        <td>${p.loadSeq ?? ''}</td>
-        <td><span class="sw" style="background:${esc(p.color || '#888')}"></span>${esc(p.name)}</td>
-        <td>${p.x.toFixed(0)}</td>
-        <td>${p.y.toFixed(0)}</td>
-        <td>${p.z.toFixed(0)}</td>
-        <td>${p.L}×${p.W}×${p.H}</td>
-        <td>${p.weightKg ?? 0}</td>
-        <td>${fmtRot(p)}</td>
-      </tr>
-    `).join('');
-    const lateral = ct.lateral && !ct.lateral.ok
-      ? `<div class="meta"><span class="warn">${t('lateralWarn')}</span> (${t('lateralOffset')} ${ct.lateral.offsetCm.toFixed(1)} cm)</div>`
-      : '';
-    const cog = ct.cog
-      ? `<div class="meta"><strong>${t('cog')}</strong>: X=${ct.cog.x.toFixed(1)} · Y=${ct.cog.y.toFixed(1)} · Z=${ct.cog.z.toFixed(1)} cm${ct.cog.hasWeight ? '' : ' (vol-weighted)'}</div>`
-      : '';
+  const cargoLinesHtml = `
+    <section>
+      <h2>${t('cargoLines')}</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>${t('name')}</th>
+            <th>${t('unitDims')}</th>
+            <th>${t('unitWeight')}</th>
+            <th>${t('boxCount')}</th>
+            <th>${t('totalWeightKg')}</th>
+            <th>${t('totalCbm')}</th>
+            <th>${t('loadOptions')}</th>
+          </tr>
+        </thead>
+        <tbody>${cargoRows}</tbody>
+      </table>
+    </section>`;
+
+  // --- Per-container compact status
+  const containerRows = result.containers.map((ct, i) => {
+    const cog = ct.cog ? `X=${ct.cog.x.toFixed(0)} · Y=${ct.cog.y.toFixed(0)} · Z=${ct.cog.z.toFixed(0)}` : '—';
     const axle = ct.axleLoads
-      ? `<div class="meta">
-          <strong>${t('axleFront')}</strong>: ${ct.axleLoads.frontKg.toFixed(0)} kg (${(ct.axleLoads.frontPct * 100).toFixed(0)}%) ·
-          <strong>${t('axleRear')}</strong>: ${ct.axleLoads.rearKg.toFixed(0)} kg (${(ct.axleLoads.rearPct * 100).toFixed(0)}%) ·
-          ${ct.axleLoads.balanced ? `<span class="ok">${t('balanced')}</span>` : `<span class="warn">${t('notBalanced')}</span>`}
-        </div>`
+      ? (ct.axleLoads.balanced ? `<span class="ok">${t('balanced')}</span>` : `<span class="warn">${t('notBalanced')}</span>`)
+      : '—';
+    const lateral = ct.lateral && !ct.lateral.ok
+      ? ` <span class="warn">${t('lateralWarn')}</span>`
       : '';
     return `
-      <section class="container-block">
-        <h2>${t('container')} ${i + 1} — ${esc(containerSpec.label)}</h2>
-        <div class="meta"><strong>${t('placedLabel')}</strong>: ${ct.placements.length} · <strong>${t('volume')}</strong>: ${(ct.stats.volumeUtilization * 100).toFixed(1)}% · <strong>${t('weight')}</strong>: ${ct.stats.usedWeightKg.toFixed(0)}/${ct.stats.payloadKg} kg</div>
-        ${cog}
-        ${lateral}
-        ${axle}
-        <h3>${t('cargoSummary')}</h3>
-        <table class="summary">
-          <thead><tr><th>${t('name')}</th><th>${t('quantity')}</th><th>${t('weight')} (kg)</th></tr></thead>
-          <tbody>${summaryRows}</tbody>
-        </table>
-        <table>
-          <thead>
-            <tr>
-              <th>${t('loadSeqCol')}</th><th>${t('name')}</th>
-              <th>X</th><th>Y</th><th>Z</th>
-              <th>${t('actualDims')} (cm)</th>
-              <th>${t('weight')} (kg)</th>
-              <th>${t('rotationLabel')}</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </section>
-    `;
+      <tr>
+        <td>${i + 1}</td>
+        <td>${ct.placements.length}</td>
+        <td>${(ct.stats.volumeUtilization * 100).toFixed(1)}%</td>
+        <td>${ct.stats.usedWeightKg.toFixed(0)} / ${ct.stats.payloadKg}</td>
+        <td>${cog}</td>
+        <td>${axle}${lateral}</td>
+      </tr>`;
   }).join('');
+
+  const perContainerHtml = `
+    <section>
+      <h2>${t('perContainer')}</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>${t('container')}</th>
+            <th>${t('boxCount')}</th>
+            <th>${t('utilization')}</th>
+            <th>${t('weight')} (kg)</th>
+            <th>${t('cog')} (cm)</th>
+            <th>${t('axleBalance')}</th>
+          </tr>
+        </thead>
+        <tbody>${containerRows}</tbody>
+      </table>
+    </section>`;
 
   const reasonLine = (u) => {
     const parts = Object.entries(u.reasons ?? {}).map(([r, n]) => `${t(REASON_KEYS[r] ?? r)}×${n}`);
@@ -246,6 +328,7 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
     ? `<section><h2>${t('unplacedLabel')}</h2><ul>${result.unplaced.map(u => `<li>${esc(u.name ?? u.cargoId)}: ${u.count}${esc(reasonLine(u))}</li>`).join('')}</ul></section>`
     : '';
 
+  // --- 3D snapshot at the very bottom
   const snapshotHtml = meta.snapshotDataUrl
     ? `<section class="snapshot"><h2>${t('snapshot3d')}</h2><img src="${meta.snapshotDataUrl}" alt="3D snapshot"></section>`
     : '';
@@ -258,33 +341,31 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
 <style>
   body { font-family: -apple-system, "Helvetica Neue", "PingFang TC", "Microsoft JhengHei", sans-serif; color: #222; margin: 24px; }
   h1 { font-size: 1.6em; margin: 0 0 4px; }
-  h2 { font-size: 1.1em; margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 2px solid #007bff; page-break-after: avoid; }
+  h2 { font-size: 1.1em; margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 2px solid #2563eb; page-break-after: avoid; }
   .header-meta { color: #666; font-size: 0.9em; margin-bottom: 16px; }
-  .meta { font-size: 0.85em; color: #444; margin: 2px 0; }
-  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.78em; }
-  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; }
-  thead th { background: #f0f4ff; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.8em; }
+  th, td { border: 1px solid #bbb; padding: 5px 7px; text-align: left; vertical-align: top; }
+  thead th { background: #eff6ff; }
   tbody tr:nth-child(even) { background: #fafafa; }
+  table.overview th { background: #eff6ff; width: 16%; white-space: nowrap; }
+  table.overview td { width: 34%; }
   .sw { display: inline-block; width: 10px; height: 10px; border: 1px solid #999; margin-right: 6px; vertical-align: middle; }
-  .ok { color: #28a745; font-weight: 600; }
-  .warn { color: #dc3545; font-weight: 600; }
-  .container-block { page-break-inside: avoid; }
-  h3 { font-size: 0.95em; margin: 12px 0 2px; }
-  table.summary { width: auto; min-width: 50%; }
+  .ok { color: #16a34a; font-weight: 600; }
+  .warn { color: #dc2626; font-weight: 600; }
+  .opt { display: inline-block; background: #eef2f7; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 6px; margin: 1px 2px 1px 0; font-size: 0.92em; white-space: nowrap; }
+  section { page-break-inside: avoid; }
   .snapshot img { max-width: 100%; border: 1px solid #ccc; border-radius: 4px; margin-top: 6px; }
   @media print { body { margin: 12mm; } }
 </style>
 </head>
 <body>
   <h1>${esc(meta.title || t('printTitle'))}</h1>
-  <div class="header-meta">
-    ${t('generated')}: ${tsHuman()} ·
-    ${t('totalContainers')}: ${result.containers.length} ·
-    ${t('totalItems')}: ${totalItems}
-  </div>
-  ${snapshotHtml}
-  ${containerSections}
+  <div class="header-meta">${t('generated')}: ${tsHuman()}</div>
+  ${overviewHtml}
+  ${cargoLinesHtml}
+  ${perContainerHtml}
   ${unplacedHtml}
+  ${snapshotHtml}
 </body>
 </html>`;
 }

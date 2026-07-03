@@ -199,7 +199,11 @@ function start() {
   });
   document.getElementById('exportPdfBtn')?.addEventListener('click', () => {
     if (ensureResult()) {
-      exportPDF(lastResult, lastContainerSpec, { ...lastMeta, snapshotDataUrl: captureImage() });
+      exportPDF(lastResult, lastContainerSpec, {
+        ...lastMeta,
+        snapshotDataUrl: captureImage(),
+        cargoTypes: ui.getState().cargoTypes,
+      });
     }
   });
   document.getElementById('exportPngBtn')?.addEventListener('click', () => {
