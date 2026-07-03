@@ -17,7 +17,34 @@ export function pack(cargoTypes, containerSpec, options = {}) {
     ...options,
   };
 
-  // 1. Expand quantity → individual box instances
+  // 1+2. Expand quantity → box instances, sorted for FFD
+  const allBoxes = expandAndSortBoxes(cargoTypes);
+
+  // 3. Loop containers
+  const containers = [];
+  let remaining = [...allBoxes];
+  let containerCount = 0;
+
+  while (remaining.length > 0 && containerCount < opts.maxContainers) {
+    containerCount++;
+    const result = packOneContainer(remaining, containerSpec, containerCount);
+    containers.push({
+      containerId: `${containerSpec.id}-${containerCount}`,
+      containerSpec,
+      placements: result.placements,
+      stats: computeStats(result.placements, containerSpec),
+    });
+    remaining = result.unplaced;
+    if (!opts.allowMultiContainer) break;
+  }
+
+  assignLoadSequence(containers);
+
+  return { containers, unplaced: summarizeUnplaced(remaining) };
+}
+
+/** Expand cargoTypes (quantity) into box instances, sorted priority → volume desc (FFD). */
+function expandAndSortBoxes(cargoTypes) {
   const allBoxes = [];
   for (const c of cargoTypes) {
     for (let i = 0; i < c.quantity; i++) {
@@ -42,7 +69,6 @@ export function pack(cargoTypes, containerSpec, options = {}) {
     }
   }
 
-  // 2. Sort: priority then volume desc (FFD)
   const priorityRank = { urgent: 0, normal: 1, lifo: 2 };
   allBoxes.sort((a, b) => {
     const pa = priorityRank[a.priority] ?? 1;
@@ -52,28 +78,14 @@ export function pack(cargoTypes, containerSpec, options = {}) {
     const vb = b.L * b.W * b.H;
     return vb - va;
   });
+  return allBoxes;
+}
 
-
-  // 3. Loop containers
-  const containers = [];
-  let remaining = [...allBoxes];
-  let containerCount = 0;
-
-  while (remaining.length > 0 && containerCount < opts.maxContainers) {
-    containerCount++;
-    const result = packOneContainer(remaining, containerSpec, containerCount);
-    containers.push({
-      containerId: `${containerSpec.id}-${containerCount}`,
-      containerSpec,
-      placements: result.placements,
-      stats: computeStats(result.placements, containerSpec),
-    });
-    remaining = result.unplaced;
-    if (!opts.allowMultiContainer) break;
-  }
-
-  // 3b. Loading sequence: per container, physical load order is back of the
-  // container first (door at +X), bottom before top; global seq spans containers.
+/**
+ * Loading sequence: per container, physical load order is back of the
+ * container first (door at +X), bottom before top; global seq spans containers.
+ */
+function assignLoadSequence(containers) {
   let globalSeq = 0;
   for (const ct of containers) {
     const ordered = [...ct.placements].sort(
@@ -81,8 +93,10 @@ export function pack(cargoTypes, containerSpec, options = {}) {
     );
     for (const p of ordered) p.loadSeq = ++globalSeq;
   }
+}
 
-  // 4. Unplaced summary by cargoId (+ failure reason from last attempt)
+/** Unplaced summary by cargoId (+ failure reason from last attempt). */
+function summarizeUnplaced(remaining) {
   const unplacedMap = new Map();
   for (const box of remaining) {
     const key = box.cargoId;
@@ -92,36 +106,67 @@ export function pack(cargoTypes, containerSpec, options = {}) {
     entry.reasons[r] = (entry.reasons[r] ?? 0) + 1;
     unplacedMap.set(key, entry);
   }
-  const unplaced = Array.from(unplacedMap.values());
-
-  return { containers, unplaced };
+  return Array.from(unplacedMap.values());
 }
 
 /**
- * Try every candidate container spec and return the best plan.
- * Score: fewest unplaced boxes → fewest containers → highest avg volume utilization.
- * @returns {Object} { result, containerSpec }
+ * Auto-select containers from the candidate specs, allowing mixed fleets
+ * (e.g. 40HQ + 40HQ + 20GP). For each container in turn, every candidate
+ * spec is tried and the one that fits the most remaining boxes wins; ties
+ * go to the smallest internal volume, so the last container is downsized
+ * when a smaller type suffices.
+ * Each entry in result.containers carries its own containerSpec.
+ * @returns {Object|null} { result, containerSpec } — containerSpec is the
+ *   first container's spec (fallback: first candidate) for legacy callers.
  */
 export function packAuto(cargoTypes, containerSpecs, options = {}) {
-  let best = null;
-  for (const spec of containerSpecs) {
-    const result = pack(cargoTypes, spec, options);
-    const unplacedCount = result.unplaced.reduce((s, u) => s + u.count, 0);
-    const containerCount = result.containers.length;
-    const avgUtil = containerCount
-      ? result.containers.reduce((s, ct) => s + ct.stats.volumeUtilization, 0) / containerCount
-      : 0;
-    const candidate = { result, containerSpec: spec, unplacedCount, containerCount, avgUtil };
-    if (
-      !best ||
-      candidate.unplacedCount < best.unplacedCount ||
-      (candidate.unplacedCount === best.unplacedCount && candidate.containerCount < best.containerCount) ||
-      (candidate.unplacedCount === best.unplacedCount && candidate.containerCount === best.containerCount && candidate.avgUtil > best.avgUtil)
-    ) {
-      best = candidate;
+  const opts = {
+    allowMultiContainer: true,
+    maxContainers: 20,
+    ...options,
+  };
+  if (!Array.isArray(containerSpecs) || containerSpecs.length === 0) return null;
+
+  let remaining = expandAndSortBoxes(cargoTypes);
+  const containers = [];
+
+  while (remaining.length > 0 && containers.length < opts.maxContainers) {
+    let best = null;
+    for (const spec of containerSpecs) {
+      const attempt = packOneContainer(remaining, spec, containers.length + 1);
+      const placedCount = attempt.placements.length;
+      const vol = spec.internal.length * spec.internal.width * spec.internal.height;
+      if (
+        !best ||
+        placedCount > best.placedCount ||
+        (placedCount === best.placedCount && vol < best.vol)
+      ) {
+        // Snapshot failure reasons now — later attempts overwrite box.unplacedReason
+        best = {
+          spec, attempt, placedCount, vol,
+          reasons: attempt.unplaced.map((b) => b.unplacedReason),
+        };
+      }
     }
+    if (!best || best.placedCount === 0) break; // nothing fits any candidate
+
+    best.attempt.unplaced.forEach((b, i) => { b.unplacedReason = best.reasons[i]; });
+    containers.push({
+      containerId: `${best.spec.id}-${containers.length + 1}`,
+      containerSpec: best.spec,
+      placements: best.attempt.placements,
+      stats: computeStats(best.attempt.placements, best.spec),
+    });
+    remaining = best.attempt.unplaced;
+    if (!opts.allowMultiContainer) break;
   }
-  return best ? { result: best.result, containerSpec: best.containerSpec } : null;
+
+  assignLoadSequence(containers);
+
+  return {
+    result: { containers, unplaced: summarizeUnplaced(remaining) },
+    containerSpec: containers[0]?.containerSpec ?? containerSpecs[0],
+  };
 }
 
 function packOneContainer(boxes, container, containerNum) {

@@ -37,7 +37,15 @@ function start() {
     const t0 = performance.now();
     let result, container, meta = {};
     if (state.containerId === ui.AUTO_CONTAINER_ID) {
-      const best = packAuto(state.cargoTypes, getAllContainers(), { allowMultiContainer: true, maxContainers: 20 });
+      // Restrict candidates to the chosen ship mode (ocean / truck / rail / custom)
+      const candidates = state.autoMode && state.autoMode !== 'all'
+        ? getAllContainers().filter((c) => c.mode === state.autoMode)
+        : getAllContainers();
+      if (candidates.length === 0) {
+        toast(t('noContainersForMode'), 'error');
+        return null;
+      }
+      const best = packAuto(state.cargoTypes, candidates, { allowMultiContainer: true, maxContainers: 20 });
       if (!best) return null;
       result = best.result;
       container = best.containerSpec;

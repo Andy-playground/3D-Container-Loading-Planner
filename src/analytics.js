@@ -138,9 +138,11 @@ export function computeLateralBalance(cog, containerSpec) {
 export function enrichResult(result, containerSpec) {
   if (!result?.containers) return result;
   for (const ct of result.containers) {
+    // Mixed-fleet plans (auto mode) carry a spec per container
+    const spec = ct.containerSpec ?? containerSpec;
     ct.cog = computeCOG(ct.placements);
-    ct.axleLoads = computeAxleLoads(ct.cog, containerSpec);
-    ct.lateral = computeLateralBalance(ct.cog, containerSpec);
+    ct.axleLoads = computeAxleLoads(ct.cog, spec);
+    ct.lateral = computeLateralBalance(ct.cog, spec);
   }
   return result;
 }

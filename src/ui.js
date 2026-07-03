@@ -10,8 +10,19 @@ const STORAGE_KEY = 'clp:current';
 
 export const AUTO_CONTAINER_ID = '__AUTO__';
 
+// Ship-mode filter choices for auto container selection
+const AUTO_MODES = ['all', 'ocean', 'truck', 'rail', 'custom'];
+const AUTO_MODE_LABEL_KEYS = {
+  all: 'shipModeAll',
+  ocean: 'shipModeOcean',
+  truck: 'shipModeTruck',
+  rail: 'shipModeRail',
+  custom: 'shipModeCustom',
+};
+
 const state = {
   containerId: 'OCEAN_40HQ',
+  autoMode: 'all', // ship-mode filter used when containerId === AUTO_CONTAINER_ID
   cargoTypes: [],
   nextCargoId: 1,
   planTitle: '',
@@ -126,9 +137,9 @@ function rebuildContainerSelect() {
   sel.appendChild(autoOpt);
 
   const groups = [
-    ['ocean', 'Ocean'],
-    ['truck', 'Truck'],
-    ['rail', 'Rail'],
+    ['ocean', t('shipModeOcean')],
+    ['truck', t('shipModeTruck')],
+    ['rail', t('shipModeRail')],
     ['custom', t('customContainer')],
   ];
   const all = getAllContainers();
@@ -151,6 +162,33 @@ function rebuildContainerSelect() {
     state.containerId = 'OCEAN_40HQ';
     sel.value = state.containerId;
   }
+  rebuildAutoModeSelect();
+  updateAutoModeVisibility();
+}
+
+function rebuildAutoModeSelect() {
+  const sel = document.getElementById('autoModeSelect');
+  if (!sel) return;
+  sel.innerHTML = '';
+  const all = getAllContainers();
+  for (const mode of AUTO_MODES) {
+    // Hide modes with no containers (e.g. custom before any is defined)
+    if (mode !== 'all' && !all.some((c) => c.mode === mode)) continue;
+    const opt = document.createElement('option');
+    opt.value = mode;
+    opt.textContent = t(AUTO_MODE_LABEL_KEYS[mode]);
+    sel.appendChild(opt);
+  }
+  sel.value = state.autoMode;
+  if (sel.value !== state.autoMode) {
+    state.autoMode = 'all';
+    sel.value = state.autoMode;
+  }
+}
+
+function updateAutoModeVisibility() {
+  const field = document.getElementById('autoModeField');
+  if (field) field.style.display = state.containerId === AUTO_CONTAINER_ID ? '' : 'none';
 }
 
 function bindContainerSelect() {
@@ -158,6 +196,15 @@ function bindContainerSelect() {
   const sel = document.getElementById('containerSelect');
   sel.addEventListener('change', () => {
     state.containerId = sel.value;
+    updateAutoModeVisibility();
+    renderContainerInfo();
+    saveToStorage();
+    emit('changed');
+    emit('containerChanged');
+  });
+  const modeSel = document.getElementById('autoModeSelect');
+  modeSel?.addEventListener('change', () => {
+    state.autoMode = modeSel.value;
     renderContainerInfo();
     saveToStorage();
     emit('changed');
@@ -630,7 +677,13 @@ function renderContainerInfo() {
   const info = document.getElementById('containerInfo');
   const delBtn = document.getElementById('ccDeleteBtn');
   if (state.containerId === AUTO_CONTAINER_ID) {
-    info.innerHTML = `<div>${t('autoContainer')}</div>`;
+    const candidates = state.autoMode === 'all'
+      ? getAllContainers()
+      : getAllContainers().filter((c) => c.mode === state.autoMode);
+    const pool = candidates.length
+      ? candidates.map((c) => c.type).join(' / ')
+      : t('noContainersForMode');
+    info.innerHTML = `<div>${t('autoContainer')}</div><div>${escapeHtml(pool)}</div>`;
     if (delBtn) delBtn.style.display = 'none';
     return;
   }
@@ -741,13 +794,25 @@ export function renderStats(result, containerSpec, meta = {}) {
     html += `<div class="warn"><strong>${t('unplacedLabel')}</strong>: ${totalUnplaced} — ${reasons}</div>`;
   }
   let containerLabel = `${containers.length}`;
-  if (meta.autoChosen && containerSpec) {
+  if (meta.autoChosen && containers.length) {
+    // Auto mode may mix types — summarize the fleet, e.g. "40HQ ×2 + 20GP ×1"
+    const byLabel = new Map();
+    for (const ct of containers) {
+      const label = (ct.containerSpec ?? containerSpec)?.label ?? '?';
+      byLabel.set(label, (byLabel.get(label) ?? 0) + 1);
+    }
+    const fleet = [...byLabel.entries()]
+      .map(([label, n]) => `${escapeHtml(label)} ×${n}`)
+      .join(' + ');
+    containerLabel += ` — ${fleet} (${t('autoChosen')})`;
+  } else if (meta.autoChosen && containerSpec) {
     containerLabel += ` × ${escapeHtml(containerSpec.label)} (${t('autoChosen')})`;
   }
   html += `<div><strong>${t('containersNeeded')}</strong>: ${containerLabel}</div>`;
   for (let i = 0; i < containers.length; i++) {
     const ct = containers[i];
-    let line = `${t('container')} ${i + 1}: ${ct.placements.length} · ${t('volume')} ${(ct.stats.volumeUtilization * 100).toFixed(1)}% · ${ct.stats.usedWeightKg.toFixed(0)}/${ct.stats.payloadKg}kg`;
+    const type = (ct.containerSpec ?? containerSpec)?.type;
+    let line = `${t('container')} ${i + 1}${type ? ` (${escapeHtml(type)})` : ''}: ${ct.placements.length} · ${t('volume')} ${(ct.stats.volumeUtilization * 100).toFixed(1)}% · ${ct.stats.usedWeightKg.toFixed(0)}/${ct.stats.payloadKg}kg`;
     if (ct.cog) {
       line += ` · ${t('cog')} (${ct.cog.x.toFixed(0)}, ${ct.cog.y.toFixed(0)}, ${ct.cog.z.toFixed(0)})`;
     }
@@ -769,6 +834,7 @@ function saveToStorage() {
   try {
     const data = {
       containerId: state.containerId,
+      autoMode: state.autoMode,
       cargoTypes: state.cargoTypes,
       nextCargoId: state.nextCargoId,
       planTitle: state.planTitle,
@@ -811,6 +877,7 @@ function loadFromStorage() {
     if (!raw) return;
     const data = JSON.parse(raw);
     if (data.containerId) state.containerId = data.containerId;
+    if (AUTO_MODES.includes(data.autoMode)) state.autoMode = data.autoMode;
     if (Array.isArray(data.cargoTypes)) {
       state.cargoTypes = data.cargoTypes.map(normalizeCargo).filter(Boolean);
     }
@@ -831,6 +898,7 @@ function exportJSON() {
       title: state.planTitle || t('planTitlePlaceholder'),
     },
     containerId: state.containerId,
+    autoMode: state.autoMode,
     customContainers: getCustomContainers(),
     cargoTypes: state.cargoTypes,
   };
@@ -860,6 +928,7 @@ export function applyImportedData(data) {
     }
   }
   if (data.containerId) state.containerId = data.containerId;
+  if (AUTO_MODES.includes(data.autoMode)) state.autoMode = data.autoMode;
   if (Array.isArray(data.cargoTypes)) state.cargoTypes = data.cargoTypes.map(normalizeCargo).filter(Boolean);
   if (data.nextCargoId) state.nextCargoId = data.nextCargoId;
   if (typeof data.metadata?.title === 'string') state.planTitle = data.metadata.title;

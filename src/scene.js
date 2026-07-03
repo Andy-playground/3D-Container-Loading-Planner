@@ -200,38 +200,41 @@ export function renderResult(result, containerSpec) {
 
   const containers = result.containers ?? [];
   totalSteps = containers.reduce((s, ct) => s + ct.placements.length, 0);
-  const count = Math.max(containers.length, 1);
-  const totalLen = count * containerSpec.internal.length + (count - 1) * GAP_BETWEEN_CONTAINERS;
-  const maxW = containerSpec.internal.width;
+  // Auto mode may mix container types — each entry carries its own spec
+  const specs = containers.length
+    ? containers.map((ct) => ct.containerSpec ?? containerSpec)
+    : [containerSpec];
+  const totalLen = specs.reduce((s, sp) => s + sp.internal.length, 0)
+    + (specs.length - 1) * GAP_BETWEEN_CONTAINERS;
+  const maxW = Math.max(...specs.map((sp) => sp.internal.width));
+  const maxH = Math.max(...specs.map((sp) => sp.internal.height));
 
   // Per-box shadows get expensive on very large plans — keep the key light
   // but stop boxes from casting beyond this threshold.
   boxShadows = totalSteps <= 500;
-  fitShadowCamera(totalLen, maxW, containerSpec.internal.height);
+  fitShadowCamera(totalLen, maxW, maxH);
 
   drawGround(totalLen, maxW);
 
-  if (containers.length === 0) {
-    drawContainerFrame(containerSpec, 0);
-    frameCamera(containerSpec, 1);
-    return;
+  let offsetX = 0;
+  for (let i = 0; i < specs.length; i++) {
+    drawContainerFrame(specs[i], offsetX);
+    const ct = containers[i];
+    if (ct) {
+      for (const p of ct.placements) {
+        drawBox(p, offsetX);
+      }
+      if (ct.cog) {
+        drawCOGMarker(ct.cog, specs[i], offsetX);
+      }
+      if (ct.axleLoads) {
+        drawAxleIndicators(ct.axleLoads, specs[i], offsetX);
+      }
+    }
+    offsetX += specs[i].internal.length + GAP_BETWEEN_CONTAINERS;
   }
 
-  for (let i = 0; i < containers.length; i++) {
-    const offsetX = i * (containerSpec.internal.length + GAP_BETWEEN_CONTAINERS);
-    drawContainerFrame(containerSpec, offsetX);
-    for (const p of containers[i].placements) {
-      drawBox(p, offsetX);
-    }
-    if (containers[i].cog) {
-      drawCOGMarker(containers[i].cog, containerSpec, offsetX);
-    }
-    if (containers[i].axleLoads) {
-      drawAxleIndicators(containers[i].axleLoads, containerSpec, offsetX);
-    }
-  }
-
-  frameCamera(containerSpec, containers.length);
+  frameCamera(totalLen, maxW, maxH);
 }
 
 function drawCOGMarker(cog, containerSpec, offsetX) {
@@ -789,11 +792,9 @@ function colorLuminance(hex) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-function frameCamera(spec, containerCount) {
-  const { length: L, width: W, height: H } = spec.internal;
-  const totalLen = L * containerCount + GAP_BETWEEN_CONTAINERS * Math.max(0, containerCount - 1);
-  const center = new THREE.Vector3(totalLen / 2, H / 2, W / 2);
-  const distance = Math.max(totalLen, W * 3, H * 3) * 0.85;
+function frameCamera(totalLen, maxW, maxH) {
+  const center = new THREE.Vector3(totalLen / 2, maxH / 2, maxW / 2);
+  const distance = Math.max(totalLen, maxW * 3, maxH * 3) * 0.85;
   camera.position.set(center.x + distance * 0.6, center.y + distance * 0.7, center.z + distance * 1.0);
   controls.target.copy(center);
   controls.update();

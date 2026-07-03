@@ -2,7 +2,7 @@
 // Run: node tests/packer.test.js
 
 import { pack, packAuto } from '../src/packer.js';
-import { getContainer, getAllContainers } from '../src/containers.js';
+import { getContainer, getAllContainers, getContainersByMode } from '../src/containers.js';
 import { computeCOG, computeAxleLoads, computeLateralBalance, enrichResult } from '../src/analytics.js';
 
 let passed = 0;
@@ -366,6 +366,67 @@ console.log('T14: i18n 鍵一致性');
   assert(missingInEn.length === 0, `T14: keys missing in en: ${missingInEn.join(', ')}`);
   assert(missingInZh.length === 0, `T14: keys missing in zh-Hant: ${missingInZh.join(', ')}`);
   console.log(`  → zh-Hant ${zh.length} 鍵 = en ${en.length} 鍵`);
+}
+
+// ===== T15: packAuto ship-mode filtering =====
+console.log('T15: 自動選櫃限定運輸方式 (ship mode)');
+{
+  const cargo = [{
+    id: 'M', name: 'ModeBox', length: 100, width: 100, height: 100,
+    weightKg: 10, quantity: 30, color: '#0af',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8,
+  }];
+  for (const mode of ['ocean', 'truck', 'rail']) {
+    const specs = getContainersByMode(mode);
+    const best = packAuto(cargo, specs);
+    assert(best !== null, `T15: packAuto(${mode}) should return a result`);
+    for (const ct of best.result.containers) {
+      assert(ct.containerSpec.mode === mode,
+        `T15: ${mode} plan used ${ct.containerSpec.id} (mode ${ct.containerSpec.mode})`);
+    }
+  }
+  assert(packAuto(cargo, []) === null, 'T15: empty candidate list should return null');
+  console.log('  → ocean/truck/rail 過濾皆只使用對應櫃型');
+}
+
+// ===== T16: packAuto mixed container combination =====
+console.log('T16: 自動選櫃混搭櫃型 (e.g. 45HQ + 20GP)');
+{
+  // 60 boxes of 100³: one large container takes ~48–52, the small tail
+  // should be downsized to the smallest ocean container that fits it.
+  const cargo = [{
+    id: 'MIX', name: 'MixBox', length: 100, width: 100, height: 100,
+    weightKg: 10, quantity: 60, color: '#fa0',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8,
+  }];
+  const oceanSpecs = getContainersByMode('ocean');
+  const best = packAuto(cargo, oceanSpecs);
+  assert(best !== null, 'T16: packAuto should return a result');
+  const { containers, unplaced } = best.result;
+  const totalPlaced = containers.reduce((s, ct) => s + ct.placements.length, 0);
+  const totalUnplaced = unplaced.reduce((s, u) => s + u.count, 0);
+  assert(totalPlaced === 60 && totalUnplaced === 0, `T16: expected 60 placed, got ${totalPlaced} (+${totalUnplaced} unplaced)`);
+  assert(containers.length === 2, `T16: expected 2 containers, got ${containers.length}`);
+  const types = containers.map((ct) => ct.containerSpec.type);
+  assert(new Set(types).size > 1, `T16: expected mixed types, got ${types.join(' + ')}`);
+  // Tail container must be strictly smaller than the first (downsized)
+  const vol = (s) => s.internal.length * s.internal.width * s.internal.height;
+  const first = containers[0].containerSpec;
+  const last = containers[containers.length - 1].containerSpec;
+  assert(vol(last) < vol(first), `T16: tail ${last.id} should be smaller than ${first.id}`);
+  // Placements must respect each container's own bounds, and stats must use its own payload
+  for (const ct of containers) {
+    assert(checkInBounds(ct.placements, ct.containerSpec) === null, `T16: out of bounds in ${ct.containerId}`);
+    assert(checkNoOverlap(ct.placements) === null, `T16: overlap in ${ct.containerId}`);
+    assert(ct.stats.payloadKg === ct.containerSpec.payloadKg, `T16: stats payload mismatch in ${ct.containerId}`);
+  }
+  // Global load sequence must span containers 1..N
+  const seqs = containers.flatMap((ct) => ct.placements.map((p) => p.loadSeq)).sort((a, b) => a - b);
+  assert(seqs[0] === 1 && seqs[seqs.length - 1] === totalPlaced && new Set(seqs).size === totalPlaced,
+    `T16: loadSeq should be 1..${totalPlaced}`);
+  console.log(`  → 混搭結果：${types.join(' + ')}`);
 }
 
 // ===== Summary =====

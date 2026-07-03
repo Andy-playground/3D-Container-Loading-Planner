@@ -41,6 +41,27 @@ function fmtRot(p) {
 
 const REASON_KEYS = { oversize: 'reasonOversize', overweight: 'reasonOverweight', nospace: 'reasonNospace' };
 
+/** Spec of one container in the result — auto plans may mix types. */
+function specOf(ct, fallbackSpec) {
+  return ct.containerSpec ?? fallbackSpec;
+}
+
+/** Fleet summary, e.g. "40ft 高櫃 (40HQ) ×2 + 20ft 標準櫃 (20GP)". */
+function fleetLabel(result, fallbackSpec, withMode = false) {
+  const byLabel = new Map();
+  for (const ct of result.containers) {
+    const s = specOf(ct, fallbackSpec);
+    const label = withMode ? `[${s.mode.toUpperCase()}] ${s.label}` : s.label;
+    byLabel.set(label, (byLabel.get(label) ?? 0) + 1);
+  }
+  if (byLabel.size === 0) {
+    return withMode ? `[${fallbackSpec.mode.toUpperCase()}] ${fallbackSpec.label}` : fallbackSpec.label;
+  }
+  return [...byLabel.entries()]
+    .map(([label, n]) => (n > 1 ? `${label} ×${n}` : label))
+    .join(' + ');
+}
+
 function fmtReasons(u) {
   const parts = Object.entries(u.reasons ?? {}).map(([r, n]) => `${t(REASON_KEYS[r] ?? r)}×${n}`);
   return parts.length ? ` (${parts.join(', ')})` : '';
@@ -56,7 +77,7 @@ export function exportTXT(result, containerSpec, meta = {}) {
   lines.push(meta.title || t('printTitle'));
   lines.push('==========================');
   lines.push(`${t('generated')}: ${tsHuman()}`);
-  lines.push(`${t('chooseContainer')}: [${containerSpec.mode.toUpperCase()}] ${containerSpec.label}`);
+  lines.push(`${t('chooseContainer')}: ${fleetLabel(result, containerSpec, true)}`);
   lines.push(`${t('totalContainers')}: ${result.containers.length}`);
   const totalItems = result.containers.reduce((s, c) => s + c.placements.length, 0);
   lines.push(`${t('totalItems')}: ${totalItems}`);
@@ -64,7 +85,7 @@ export function exportTXT(result, containerSpec, meta = {}) {
 
   for (let i = 0; i < result.containers.length; i++) {
     const ct = result.containers[i];
-    lines.push(`=== ${t('container')} ${i + 1} (${containerSpec.type}) ===`);
+    lines.push(`=== ${t('container')} ${i + 1} (${specOf(ct, containerSpec).type}) ===`);
     lines.push(`${t('placedLabel')}: ${ct.placements.length} ${t('boxes')}`);
     lines.push(`${t('volume')}: ${(ct.stats.volumeUtilization * 100).toFixed(1)}%`);
     lines.push(`${t('weight')}: ${ct.stats.usedWeightKg.toFixed(0)}/${ct.stats.payloadKg} kg`);
@@ -119,7 +140,7 @@ export function exportCSV(result, containerSpec, meta = {}) {
       rows.push([
         p.loadSeq ?? '',
         p.name,
-        `${i + 1}/${containerSpec.type}`,
+        `${i + 1}/${specOf(ct, containerSpec).type}`,
         p.x.toFixed(1),
         p.y.toFixed(1),
         p.z.toFixed(1),
@@ -193,7 +214,7 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
       <table class="overview">
         <tbody>
           <tr>
-            <th>${t('chooseContainer')}</th><td>${esc(containerSpec.label)}${meta.autoChosen ? ` (${t('autoChosen')})` : ''}</td>
+            <th>${t('chooseContainer')}</th><td>${esc(fleetLabel(result, containerSpec))}${meta.autoChosen ? ` (${t('autoChosen')})` : ''}</td>
             <th>${t('totalContainers')}</th><td>${result.containers.length}</td>
           </tr>
           <tr>
@@ -293,7 +314,7 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
       : '';
     return `
       <tr>
-        <td>${i + 1}</td>
+        <td>${i + 1} (${esc(specOf(ct, containerSpec).type)})</td>
         <td>${ct.placements.length}</td>
         <td>${(ct.stats.volumeUtilization * 100).toFixed(1)}%</td>
         <td>${ct.stats.usedWeightKg.toFixed(0)} / ${ct.stats.payloadKg}</td>
