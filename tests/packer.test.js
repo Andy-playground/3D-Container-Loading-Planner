@@ -368,6 +368,202 @@ console.log('T14: i18n 鍵一致性');
   console.log(`  → zh-Hant ${zh.length} 鍵 = en ${en.length} 鍵`);
 }
 
+// ===== T15: Pyramid loading — heavy at the bottom, light on top =====
+console.log('T15: 金字塔疊貨（重下輕上）');
+{
+  // 20GP floor fits exactly 10 boxes of 110×110 → the other 10 MUST stack.
+  const mk = (id, kg) => ({
+    id, name: id, length: 110, width: 110, height: 110,
+    weightKg: kg, quantity: 10, color: '#888',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8,
+  });
+  const c = getContainer('OCEAN_20GP');
+  // Light cargo listed FIRST — ordering must still put heavy below.
+  const result = pack([mk('LIGHT', 5), mk('HEAVY', 90)], c);
+  const ps = result.containers.flatMap(ct => ct.placements);
+  const floor = ps.filter(p => p.z < 0.01);
+  const upper = ps.filter(p => p.z >= 0.01);
+  assert(floor.length === 10 && upper.length === 10, `T15: expected 10 floor + 10 stacked, got ${floor.length}+${upper.length}`);
+  assert(floor.every(p => p.weightKg === 90), 'T15: floor layer must be the heavy cargo');
+  assert(upper.every(p => p.weightKg === 5), 'T15: upper layer must be the light cargo');
+  // No box may rest on a lighter box anywhere
+  let heavyOnLight = 0;
+  for (const p of upper) {
+    const sup = ps.filter(q => Math.abs(q.z + q.H - p.z) < 0.01 &&
+      q.x < p.x + p.L && p.x < q.x + q.L && q.y < p.y + p.W && p.y < q.y + q.W);
+    if (sup.some(s => p.weightKg > s.weightKg + 0.01)) heavyOnLight++;
+  }
+  assert(heavyOnLight === 0, `T15: ${heavyOnLight} boxes rest on lighter boxes`);
+  console.log(`  → 底層均重 ${floor[0].weightKg}kg、上層均重 ${upper[0].weightKg}kg、重壓輕 ${heavyOnLight} 件`);
+}
+
+// ===== T16: nonStackable — floor only, nothing on top =====
+console.log('T16: 不可堆疊（鋰電池／輪組棧板）');
+{
+  const cargo = [
+    { id: 'PALLET', name: 'Battery Pallet', length: 120, width: 100, height: 130,
+      weightKg: 180, quantity: 3, color: '#f90', nonStackable: true,
+      rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+      maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8 },
+    { id: 'BOX', name: 'Carton', length: 100, width: 100, height: 100,
+      weightKg: 20, quantity: 20, color: '#09f',
+      rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+      maxStackLayers: 99, maxLoadOnTopKg: 500, supportRatioMin: 0.8 },
+  ];
+  const c = getContainer('OCEAN_20GP');
+  const result = pack(cargo, c);
+  const ps = result.containers.flatMap(ct => ct.placements);
+  const pallets = ps.filter(p => p.cargoId === 'PALLET');
+  assert(pallets.length === 3, `T16: all 3 pallets should be placed, got ${pallets.length}`);
+  assert(pallets.every(p => p.z < 0.01), 'T16: nonStackable pallets must sit on the floor');
+  assert(pallets.every(p => p.nonStackable === true), 'T16: placements must carry nonStackable flag');
+  // Nothing may rest on a pallet: no placement's bottom touches a pallet's top
+  let onPallet = 0;
+  for (const p of ps) {
+    if (p.z < 0.01) continue;
+    for (const q of pallets) {
+      if (Math.abs(q.z + q.H - p.z) < 0.01 &&
+          q.x < p.x + p.L && p.x < q.x + q.L && q.y < p.y + p.W && p.y < q.y + q.W) onPallet++;
+    }
+  }
+  assert(onPallet === 0, `T16: ${onPallet} boxes were stacked on nonStackable pallets`);
+  const stackedBoxes = ps.filter(p => p.cargoId === 'BOX' && p.z >= 0.01).length;
+  assert(stackedBoxes > 0, 'T16: normal cartons should still stack on each other');
+  console.log(`  → 棧板 ${pallets.length} 全在地面、其上 0 箱；一般紙箱堆疊 ${stackedBoxes} 箱`);
+}
+
+// ===== T17: maxLoadOnTopKg enforced down the support chain =====
+console.log('T17: 頂壓上限沿支撐鏈驗證');
+{
+  // Single-column container: A (limit 50) ← B 40kg ← C 30kg.
+  // B alone is fine (40 ≤ 50) but adding C pushes A to 70 > 50 → C must be rejected.
+  const col = { id: 'TEST_COL', label: 'Test Column', mode: 'ocean',
+    internal: { length: 100, width: 100, height: 400 }, payloadKg: 10000 };
+  const mk = (id, kg, topKg) => ({
+    id, name: id, length: 100, width: 100, height: 100,
+    weightKg: kg, quantity: 1, color: '#888',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: topKg, supportRatioMin: 0.8,
+  });
+  const result = pack([mk('A', 100, 50), mk('B', 40, 100), mk('C', 30, 100)], col,
+    { allowMultiContainer: false });
+  const ps = result.containers.flatMap(ct => ct.placements);
+  const unplaced = result.unplaced.reduce((s, u) => s + u.count, 0);
+  assert(ps.length === 2, `T17: expected A+B placed, got ${ps.length}`);
+  assert(ps.some(p => p.cargoId === 'A' && p.z < 0.01), 'T17: A should be on the floor');
+  assert(ps.some(p => p.cargoId === 'B' && Math.abs(p.z - 100) < 0.01), 'T17: B should rest on A');
+  assert(unplaced === 1 && result.unplaced[0]?.cargoId === 'C',
+    `T17: C must be rejected (chain overload), unplaced=${unplaced}`);
+  console.log('  → B(40kg) 可放於 A(限重50)，C(30kg) 因 A 累計 70kg 超載被正確拒絕');
+}
+
+// ===== T18: supportRatioMin rejects overhanging placement =====
+console.log('T18: 支撐比例下限');
+{
+  const col = { id: 'TEST_SR', label: 'Test Support', mode: 'ocean',
+    internal: { length: 100, width: 100, height: 300 }, payloadKg: 10000 };
+  const mk = (ratio) => ([
+    { id: 'BASE', name: 'Base', length: 50, width: 100, height: 100,
+      weightKg: 50, quantity: 1, color: '#888',
+      rotatable: { yaw: false, pitch: false, roll: false }, thisSideUp: true,
+      maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8 },
+    { id: 'TOP', name: 'Top', length: 100, width: 100, height: 100,
+      weightKg: 10, quantity: 1, color: '#08f',
+      rotatable: { yaw: false, pitch: false, roll: false }, thisSideUp: true,
+      maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: ratio },
+  ]);
+  // 80% required but only 50% available → TOP must be rejected
+  const strict = pack(mk(0.8), col, { allowMultiContainer: false });
+  const strictUnplaced = strict.unplaced.reduce((s, u) => s + u.count, 0);
+  assert(strictUnplaced === 1 && strict.unplaced[0]?.cargoId === 'TOP',
+    `T18: 50% support < 80% min must reject TOP, unplaced=${strictUnplaced}`);
+  // 50% allowed → TOP sits on BASE at z=100
+  const loose = pack(mk(0.5), col, { allowMultiContainer: false });
+  const top = loose.containers.flatMap(ct => ct.placements).find(p => p.cargoId === 'TOP');
+  assert(top && Math.abs(top.z - 100) < 0.01, `T18: with 50% min TOP should stack at z=100, got z=${top?.z}`);
+  console.log('  → 支撐 50%：門檻 80% 拒絕、門檻 50% 允許');
+}
+
+// ===== T19: All-unplaceable cargo must not create empty containers =====
+console.log('T19: 全數無法放置 → 不產生空櫃');
+{
+  const cargo = [
+    { id: 'TOOBIG', name: 'TooBig', length: 700, width: 300, height: 300,
+      weightKg: 10, quantity: 2, color: '#f00',
+      rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+      maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8 },
+  ];
+  const c = getContainer('OCEAN_20GP');
+  const result = pack(cargo, c);
+  assert(result.containers.length === 0, `T19: expected 0 containers, got ${result.containers.length}`);
+  const unplaced = result.unplaced.reduce((s, u) => s + u.count, 0);
+  assert(unplaced === 2, `T19: both boxes unplaced, got ${unplaced}`);
+  console.log(`  → 貨櫃數 ${result.containers.length}、未裝 ${unplaced}（修正前會產生 20 個空櫃）`);
+}
+
+// ===== T20: pitch/roll orientations produce correct dimensions =====
+console.log('T20: pitch/roll 旋轉尺寸');
+{
+  // Container fits ONLY the pitched orientation (W↔H): 100×50×20 → 100×20×50
+  const cp = { id: 'TEST_P', label: 'Pitch', mode: 'ocean',
+    internal: { length: 100, width: 20, height: 50 }, payloadKg: 1000 };
+  const pitchCargo = [{ id: 'P', name: 'Pitch', length: 100, width: 50, height: 20,
+    weightKg: 5, quantity: 1, color: '#888', thisSideUp: false,
+    rotatable: { yaw: false, pitch: true, roll: false },
+    maxStackLayers: 99, maxLoadOnTopKg: 100, supportRatioMin: 0.8 }];
+  const rp = pack(pitchCargo, cp, { allowMultiContainer: false });
+  const pp = rp.containers[0]?.placements[0];
+  assert(pp && pp.pitch === 90 && pp.W === 20 && pp.H === 50,
+    `T20: pitch should swap W/H, got ${JSON.stringify({ W: pp?.W, H: pp?.H, pitch: pp?.pitch })}`);
+  // Container fits ONLY the rolled orientation (L↔H): 20×50×100 → 100×50×20
+  const cr = { id: 'TEST_R', label: 'Roll', mode: 'ocean',
+    internal: { length: 100, width: 50, height: 20 }, payloadKg: 1000 };
+  const rollCargo = [{ id: 'R', name: 'Roll', length: 20, width: 50, height: 100,
+    weightKg: 5, quantity: 1, color: '#888', thisSideUp: false,
+    rotatable: { yaw: false, pitch: false, roll: true },
+    maxStackLayers: 99, maxLoadOnTopKg: 100, supportRatioMin: 0.8 }];
+  const rr = pack(rollCargo, cr, { allowMultiContainer: false });
+  const pr = rr.containers[0]?.placements[0];
+  assert(pr && pr.roll === 90 && pr.L === 100 && pr.H === 20,
+    `T20: roll should swap L/H, got ${JSON.stringify({ L: pr?.L, H: pr?.H, roll: pr?.roll })}`);
+  console.log('  → pitch(W↔H) 與 roll(L↔H) 尺寸交換正確');
+}
+
+// ===== T21: maxStackLayers intermediate value =====
+console.log('T21: 最大堆疊層數 = 2');
+{
+  const cargo = [{ id: 'L2', name: 'TwoLayers', length: 100, width: 100, height: 80,
+    weightKg: 10, quantity: 60, color: '#888',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 2, maxLoadOnTopKg: 1000, supportRatioMin: 0.8 }];
+  const c = getContainer('OCEAN_40HQ'); // height 269 would allow 3 layers of 80
+  const result = pack(cargo, c);
+  const ps = result.containers.flatMap(ct => ct.placements);
+  const tooHigh = ps.filter(p => p.z > 80.01);
+  assert(tooHigh.length === 0, `T21: ${tooHigh.length} boxes above layer 2 despite maxStackLayers=2`);
+  assert(ps.some(p => Math.abs(p.z - 80) < 0.01), 'T21: layer 2 should be used');
+  console.log(`  → ${ps.length} 箱全部位於第 1–2 層`);
+}
+
+// ===== T22: Performance smoke (NFR-1: 1000 boxes < 3s) =====
+console.log('T22: 效能煙霧測試');
+{
+  const mk = (id, l, w, h, kg, q) => ({ id, name: id, length: l, width: w, height: h,
+    weightKg: kg, quantity: q, color: '#333',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: 500, supportRatioMin: 0.8 });
+  const cargo = [mk('A', 100, 80, 60, 30, 400), mk('B', 60, 40, 40, 12, 400), mk('C', 120, 100, 90, 80, 200)];
+  const c = getContainer('OCEAN_40HQ');
+  const t0 = performance.now();
+  const result = pack(cargo, c, { maxContainers: 20 });
+  const ms = performance.now() - t0;
+  const placed = result.containers.reduce((s, ct) => s + ct.placements.length, 0);
+  assert(ms < 3000, `T22: 1000 boxes took ${ms.toFixed(0)}ms (NFR-1 requires < 3000ms)`);
+  assert(placed === 1000, `T22: all 1000 boxes should be placed, got ${placed}`);
+  console.log(`  → 1000 箱 ${ms.toFixed(0)}ms、${result.containers.length} 櫃、全數裝載`);
+}
+
 // ===== Summary =====
 console.log('\n========================');
 console.log(`通過: ${passed}, 失敗: ${failed}`);

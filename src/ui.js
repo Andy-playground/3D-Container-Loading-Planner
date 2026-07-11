@@ -263,6 +263,7 @@ function readCargoForm() {
   const allowPitch = document.getElementById('cargoPitch').checked;
   const allowRoll = document.getElementById('cargoRoll').checked;
   const thisSideUp = document.getElementById('cargoThisSideUp').checked;
+  const nonStackable = document.getElementById('cargoNonStackable')?.checked ?? false;
   const groupSameSku = document.getElementById('cargoGroupSku')?.checked ?? false;
   const priority = document.getElementById('cargoPriority').value;
 
@@ -277,6 +278,7 @@ function readCargoForm() {
     rotatable: { yaw: allowYaw, pitch: allowPitch, roll: allowRoll },
     thisSideUp,
     maxStackLayers, maxLoadOnTopKg, supportRatioMin,
+    nonStackable,
     groupSameSku,
     priority,
   };
@@ -297,6 +299,8 @@ function fillCargoForm(c) {
   document.getElementById('cargoPitch').checked = !!c.rotatable?.pitch;
   document.getElementById('cargoRoll').checked = !!c.rotatable?.roll;
   document.getElementById('cargoThisSideUp').checked = !!c.thisSideUp;
+  const ns = document.getElementById('cargoNonStackable');
+  if (ns) ns.checked = !!c.nonStackable;
   const gs = document.getElementById('cargoGroupSku');
   if (gs) gs.checked = !!c.groupSameSku;
   document.getElementById('cargoPriority').value = c.priority ?? 'normal';
@@ -359,14 +363,15 @@ function bindCsvImport() {
   document.getElementById('csvTemplateBtn')?.addEventListener('click', downloadCsvTemplate);
 }
 
-const CSV_COLUMNS = ['name', 'length_cm', 'width_cm', 'height_cm', 'weight_kg', 'quantity', 'color', 'max_stack_layers', 'max_load_on_top_kg', 'this_side_up', 'priority'];
+const CSV_COLUMNS = ['name', 'length_cm', 'width_cm', 'height_cm', 'weight_kg', 'quantity', 'color', 'max_stack_layers', 'max_load_on_top_kg', 'non_stackable', 'this_side_up', 'priority'];
 
 function downloadCsvTemplate() {
   const rows = [
     CSV_COLUMNS.join(','),
-    'Cargo A,100,80,60,10,20,#3498db,99,500,1,normal',
-    'Cargo B,120,100,90,25,8,#e74c3c,3,200,1,urgent',
-    'Fragile C,60,40,40,5,30,#2ecc71,1,0,1,lifo',
+    'Cargo A,100,80,60,10,20,#3498db,99,500,0,1,normal',
+    'Cargo B,120,100,90,25,8,#e74c3c,3,200,0,1,urgent',
+    'Fragile C,60,40,40,5,30,#2ecc71,1,0,0,1,lifo',
+    'Battery Pallet,120,100,120,400,2,#f39c12,1,0,1,1,normal',
   ];
   const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -432,6 +437,7 @@ function parseCargoCSV(text) {
       continue;
     }
     const tsu = (col(row, 'this_side_up') ?? '1').toLowerCase();
+    const nsv = (col(row, 'non_stackable') ?? '0').toLowerCase();
     rows.push({
       line,
       error: null,
@@ -449,6 +455,7 @@ function parseCargoCSV(text) {
           return isFinite(v) ? v : Infinity;
         })(),
         supportRatioMin: 0.8,
+        nonStackable: nsv === '1' || nsv === 'true' || nsv === 'yes',
         groupSameSku: false,
         priority: ['normal', 'urgent', 'lifo'].includes((col(row, 'priority') ?? '').toLowerCase())
           ? col(row, 'priority').toLowerCase() : 'normal',
@@ -669,7 +676,7 @@ function renderCargoList() {
       <div class="cargo-info">
         <div class="cargo-name">${escapeHtml(c.name)} <span class="qty">×${c.quantity}</span> ${priorityBadge}</div>
         <div class="cargo-meta">${c.length}×${c.width}×${c.height}cm · ${c.weightKg}kg</div>
-        <div class="cargo-meta">≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · top≤${c.maxLoadOnTopKg === Infinity ? '∞' : c.maxLoadOnTopKg}kg · ${rotAxes.join('') || '—'}${c.thisSideUp ? ' ·↑' : ''}${c.groupSameSku ? ' ·▦' : ''}</div>
+        <div class="cargo-meta">≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · top≤${c.maxLoadOnTopKg === Infinity ? '∞' : c.maxLoadOnTopKg}kg · ${rotAxes.join('') || '—'}${c.thisSideUp ? ' ·↑' : ''}${c.nonStackable ? ' ·⊘' : ''}${c.groupSameSku ? ' ·▦' : ''}</div>
       </div>
       <div class="row-actions">
         <button class="icon-btn eye-btn" data-id="${c.id}" title="${t('hideTitle')}">${hidden ? '🙈' : '👁'}</button>
@@ -799,6 +806,8 @@ function normalizeCargo(c) {
     maxStackLayers: Math.max(1, Math.round(numOr(c.maxStackLayers, 99))),
     maxLoadOnTopKg: Math.max(0, numOr(c.maxLoadOnTopKg, Infinity)),
     supportRatioMin: Math.min(1, Math.max(0, numOr(c.supportRatioMin, 0.8))),
+    nonStackable: c.nonStackable === true || c.nonStackable === 1 ||
+      ['1', 'true', 'yes'].includes(String(c.nonStackable ?? '').toLowerCase()),
     groupSameSku: c.groupSameSku ?? false,
     priority: ['normal', 'urgent', 'lifo'].includes(c.priority) ? c.priority : 'normal',
     visible: c.visible !== false,

@@ -194,9 +194,11 @@ interface CargoItem {
   thisSideUp: boolean        // 強制 pitch=roll=false
   rotationStep: number       // degrees (90 | 45 | 15)
   // 堆疊
-  maxStackLayers: number     // 含自身（1=不可堆疊）
+  maxStackLayers: number     // 含自身（1=自身不往上疊）
   maxLoadOnTopKg: number     // 頂面可承重 kg
   supportRatioMin: number    // 0~1
+  nonStackable: boolean      // 不可堆疊：僅放櫃底地面、上方永不放貨
+                             // （鋰電池／輪組等打棧板貨，輸入打棧板後整體尺寸與總重）
   groupSameSku: boolean      // 同 SKU 聚集
   // 棧板
   isPallet: boolean
@@ -351,36 +353,39 @@ interface LoadingPlan {
 
 ## 8. 演算法設計
 
-### 8.1 主演算法：Extreme-Point Heuristic + FFD
+### 8.1 主演算法：Extreme-Point Heuristic + 重量優先 FFD（金字塔式）
 
 **Pre-processing**：
 1. 展開 `quantity` 為個別 box instance
 2. 依 `priority` 分組：urgent → normal → lifo
-3. 組內依 `max(L,W,H) × volume` 由大到小排序（FFD）
+3. 組內依 **重量由重到輕**（重貨先裝 → 自然落在底層，形成金字塔式堆疊）；同重再依 volume 由大到小排序（FFD）
 
-**Main loop**（每個 container）：
+**Main loop**（每個 container，best-fit 評分制）：
 ```
 EP = [{x:0, y:0, z:0}]                  // 初始極點
 placed = []
 for each box in sortedBoxes:
-    for each orientation in validOrientations(box):
-        for each ep in EP (sorted by z, y, x ASC):
-            if canPlace(ep, orientation, placed, container):
-                place(box at ep, orientation)
-                EP = updateExtremePoints(EP, box, ep)
-                break
-        if placed: break
-    if not placed: skip → 開新 container
+    candidates = []
+    for each ep in EP (sorted by z, x, y ASC):
+        for each orientation in validOrientations(box):
+            if feasible(ep, orientation, placed, container):
+                candidates.push({ep, orientation, score})
+    // score（lexicographic）：z 最低 → 不壓在較輕的箱上（金字塔懲罰）
+    //                        → x 最小（櫃內深處）→ y 最小
+    if candidates: place(best candidate); EP = updateExtremePoints(...)
+    else: box → unplaced（多櫃時進入下一櫃）
+若整櫃一箱都放不進 → 停止開新櫃（避免空櫃）
 ```
 
-**`canPlace` 檢查項目**：
+**`feasible` 檢查項目**：
 1. **邊界**：`ep + dims ≤ container.internal`
 2. **碰撞**：與 `placed[]` 任何 box 之 AABB 不相交
 3. **支撐**：`z=0` 或 `supportArea/baseArea ≥ supportRatioMin`
-4. **頂壓**：對所有下方支撐者，加上自身重量後 ≤ 其 `maxLoadOnTopKg`
-5. **層數**：自頂向下計算，總層數 ≤ `maxStackLayers`
+4. **頂壓（支撐鏈）**：自身重量依接觸面積比例分配給各支撐者，並**沿支撐鏈向下傳遞**；鏈上每一箱之累計承載 ≤ 其 `maxLoadOnTopKg`
+5. **層數**：層數快取於 placement（地面=1），總層數 ≤ `maxStackLayers`
 6. **重量**：container 已用重量 + 自身 ≤ `payloadKg`
 7. **方向**：`thisSideUp` 限制 pitch/roll = 0
+8. **不可堆疊**：`nonStackable` 貨物僅可放 `z=0`；任何貨物不得放在 `nonStackable`（或 `maxLoadOnTopKg=0`）貨物之上
 
 ### 8.2 Extreme Point 更新規則
 
@@ -388,7 +393,8 @@ for each box in sortedBoxes:
 - `(x+L, y, z)` — 沿 X 推進
 - `(x, y+W, z)` — 沿 Y 推進
 - `(x, y, z+H)` — 沿 Z 推進（堆疊）
-- 同時移除被覆蓋的舊 EP
+- **向下投影**：兩個側向極點若懸空，另投影至其正下方最高的實體表面（或地板），避免遺漏可用位置
+- 同時移除被覆蓋的舊 EP；位於櫃壁上（放不進任何箱）的極點直接剔除
 
 ### 8.3 多貨櫃展開
 

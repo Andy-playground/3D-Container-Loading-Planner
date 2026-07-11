@@ -1,5 +1,20 @@
-// 3D Bin Packing — Extreme-Point Heuristic + FFD
+// 3D Bin Packing — Extreme-Point Heuristic + weight-first FFD (pyramid loading)
 // Per SDD §8
+//
+// Placement strategy (v3.2):
+//   1. Boxes are sorted priority → weight (heavy first) → volume, so heavy
+//      cargo claims the floor and light cargo naturally ends up on top
+//      ("pyramid" loading).
+//   2. For each box every feasible (extreme point × orientation) pair is
+//      scored and the best one wins (best-fit), instead of taking the first
+//      fit. Score prefers: lowest z → not resting on lighter boxes →
+//      deepest into the container (low x) → left (low y).
+//   3. Top-load limits are verified down the whole support chain. A box's
+//      weight is distributed to its supporters proportionally to contact
+//      area and propagated transitively, so a limit three layers down can
+//      still veto a placement.
+//   4. nonStackable cargo (palletized lithium batteries, wheelsets, …) is
+//      floor-only and nothing may ever rest on it.
 
 const EPSILON = 0.001;
 
@@ -36,18 +51,20 @@ export function pack(cargoTypes, containerSpec, options = {}) {
         maxStackLayers: c.maxStackLayers ?? 99,
         maxLoadOnTopKg: c.maxLoadOnTopKg ?? Infinity,
         supportRatioMin: c.supportRatioMin ?? 0.8,
+        nonStackable: c.nonStackable ?? false,
         priority: c.priority ?? 'normal',
         groupSameSku: c.groupSameSku ?? false,
       });
     }
   }
 
-  // 2. Sort: priority then volume desc (FFD)
+  // 2. Sort: priority → weight desc (heavy loads first = pyramid) → volume desc (FFD)
   const priorityRank = { urgent: 0, normal: 1, lifo: 2 };
   allBoxes.sort((a, b) => {
     const pa = priorityRank[a.priority] ?? 1;
     const pb = priorityRank[b.priority] ?? 1;
     if (pa !== pb) return pa - pb;
+    if (Math.abs(b.weightKg - a.weightKg) > EPSILON) return b.weightKg - a.weightKg;
     const va = a.L * a.W * a.H;
     const vb = b.L * b.W * b.H;
     return vb - va;
@@ -57,13 +74,14 @@ export function pack(cargoTypes, containerSpec, options = {}) {
   // 3. Loop containers
   const containers = [];
   let remaining = [...allBoxes];
-  let containerCount = 0;
 
-  while (remaining.length > 0 && containerCount < opts.maxContainers) {
-    containerCount++;
-    const result = packOneContainer(remaining, containerSpec, containerCount);
+  while (remaining.length > 0 && containers.length < opts.maxContainers) {
+    const result = packOneContainer(remaining, containerSpec, containers.length + 1);
+    // No box fit in a fresh empty container → adding more containers can
+    // never make progress; stop instead of emitting empty containers.
+    if (result.placements.length === 0) break;
     containers.push({
-      containerId: `${containerSpec.id}-${containerCount}`,
+      containerId: `${containerSpec.id}-${containers.length + 1}`,
       containerSpec,
       placements: result.placements,
       stats: computeStats(result.placements, containerSpec),
@@ -129,6 +147,7 @@ function packOneContainer(boxes, container, containerNum) {
   const unplaced = [];
   let extremePoints = [{ x: 0, y: 0, z: 0 }];
   let totalWeight = 0;
+  const internal = container.internal;
 
   for (const box of boxes) {
     // Container weight check
@@ -141,7 +160,6 @@ function packOneContainer(boxes, container, containerNum) {
     const orientations = getValidOrientations(box);
 
     // Oversize: no orientation fits even an empty container
-    const internal = container.internal;
     const fitsAtAll = orientations.some(
       (o) => o.L <= internal.length + EPSILON &&
              o.W <= internal.width + EPSILON &&
@@ -152,22 +170,20 @@ function packOneContainer(boxes, container, containerNum) {
       unplaced.push(box);
       continue;
     }
-    let placed = false;
 
     // Sort EPs to encourage back-to-front, bottom-up packing.
     // Door is at +X end → low x = furthest from door = preferred.
-    // This naturally produces a "staircase to door" pattern when not full,
-    // with tall stacks at the back supporting lighter ones in front.
-    let sortedEPs = [...extremePoints].sort(
+    const sortedEPs = [...extremePoints].sort(
       (a, b) => a.z - b.z || a.x - b.x || a.y - b.y
     );
 
-    // groupSameSku (FR 3.4): prefer placement points nearest to boxes of the
-    // same cargo already placed, so the SKU forms one spatial cluster.
+    // groupSameSku (FR 3.4): pull the box toward the cluster of already
+    // placed boxes of the same cargo, so the SKU stays spatially together.
+    let clusterDist = null;
     if (box.groupSameSku) {
       const same = placements.filter((p) => p.cargoId === box.cargoId);
       if (same.length > 0) {
-        const distSq = (ep) => {
+        clusterDist = (ep) => {
           let min = Infinity;
           for (const p of same) {
             const dx = ep.x - (p.x + p.L / 2);
@@ -178,50 +194,64 @@ function packOneContainer(boxes, container, containerNum) {
           }
           return min;
         };
-        sortedEPs = sortedEPs
-          .map((ep) => ({ ep, d: distSq(ep) }))
-          .sort((a, b) => a.d - b.d)
-          .map((x) => x.ep);
       }
     }
 
+    // Best-fit: score every feasible (EP × orientation) and keep the best.
+    // Key is lexicographic; when not clustering it starts with z, so once a
+    // feasible spot exists no EP at a higher level can win → early break.
+    let best = null;
     for (const ep of sortedEPs) {
-      for (const orient of orientations) {
-        if (canPlace(ep, orient, box, placements, container)) {
-          const placement = {
-            instanceId: box.instanceId,
-            cargoId: box.cargoId,
-            name: box.name,
-            color: box.color,
-            x: ep.x,
-            y: ep.y,
-            z: ep.z,
-            L: orient.L,
-            W: orient.W,
-            H: orient.H,
-            weightKg: box.weightKg,
-            maxLoadOnTopKg: box.maxLoadOnTopKg,
-            thisSideUp: box.thisSideUp,
-            nonStackable: box.maxStackLayers <= 1 || box.maxLoadOnTopKg <= 0,
-            yaw: orient.yaw,
-            pitch: orient.pitch,
-            roll: orient.roll,
-            containerNum,
-          };
-          placements.push(placement);
-          totalWeight += box.weightKg;
-          extremePoints = updateExtremePoints(extremePoints, placement);
-          placed = true;
-          break;
+      if (best && !clusterDist && ep.z > best.key[0] + EPSILON) break;
+      for (let oi = 0; oi < orientations.length; oi++) {
+        const ev = evaluatePlacement(ep, orientations[oi], box, placements, container);
+        if (!ev) continue;
+        const key = clusterDist
+          ? [clusterDist(ep), ep.z, ev.penalty, ep.x, ep.y, oi]
+          : [ep.z, ev.penalty, ep.x, ep.y, oi];
+        if (!best || lexLess(key, best.key)) {
+          best = { ep, orient: orientations[oi], ev, key };
         }
       }
-      if (placed) break;
     }
 
-    if (!placed) {
+    if (!best) {
       box.unplacedReason = 'nospace';
       unplaced.push(box);
+      continue;
     }
+
+    const { ep, orient, ev } = best;
+    const placement = {
+      instanceId: box.instanceId,
+      cargoId: box.cargoId,
+      name: box.name,
+      color: box.color,
+      x: ep.x,
+      y: ep.y,
+      z: ep.z,
+      L: orient.L,
+      W: orient.W,
+      H: orient.H,
+      weightKg: box.weightKg,
+      maxLoadOnTopKg: box.maxLoadOnTopKg,
+      thisSideUp: box.thisSideUp,
+      nonStackable: box.nonStackable || box.maxLoadOnTopKg <= 0,
+      yaw: orient.yaw,
+      pitch: orient.pitch,
+      roll: orient.roll,
+      containerNum,
+      // Support graph (internal): direct supporters + contact-area fraction,
+      // stack layer (floor = 1), and total load currently carried on top.
+      supports: ev.supports,
+      layer: ev.layer,
+      carriedKg: 0,
+    };
+    // Commit this box's distributed weight down the support chain.
+    for (const [p, addKg] of ev.loadAdditions) p.carriedKg += addKg;
+    placements.push(placement);
+    totalWeight += box.weightKg;
+    extremePoints = updateExtremePoints(extremePoints, placement, placements, internal);
   }
 
   return { placements, unplaced };
@@ -260,7 +290,21 @@ function getValidOrientations(box) {
   return orientations;
 }
 
-function canPlace(ep, orient, box, placed, container) {
+function lexLess(a, b) {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] < b[i] - EPSILON) return true;
+    if (a[i] > b[i] + EPSILON) return false;
+  }
+  return false;
+}
+
+/**
+ * Check whether `box` in `orient` can sit at `ep`, and if so return the
+ * placement metadata needed to commit it:
+ *   { layer, penalty, supports: [{p, f}], loadAdditions: Map<placement, kg> }
+ * Returns null when any hard constraint fails.
+ */
+function evaluatePlacement(ep, orient, box, placed, container) {
   const { x, y, z } = ep;
   const { L, W, H } = orient;
   const internal = container.internal;
@@ -270,51 +314,98 @@ function canPlace(ep, orient, box, placed, container) {
     x + L > internal.length + EPSILON ||
     y + W > internal.width + EPSILON ||
     z + H > internal.height + EPSILON
-  ) return false;
+  ) return null;
 
   // 2. Collision check (AABB)
   for (const p of placed) {
     if (intersects(x, y, z, L, W, H, p.x, p.y, p.z, p.L, p.W, p.H)) {
-      return false;
+      return null;
     }
   }
 
-  // 3. Support / stacking check
-  if (z > EPSILON) {
-    const supporters = placed.filter(
-      (p) => Math.abs(p.z + p.H - z) < EPSILON &&
-             rectanglesIntersect(x, y, L, W, p.x, p.y, p.L, p.W)
-    );
-    if (supporters.length === 0) return false;
-
-    // Support ratio (bottom area covered)
-    const baseArea = L * W;
-    let supportedArea = 0;
-    for (const s of supporters) {
-      const ix = Math.max(x, s.x);
-      const iy = Math.max(y, s.y);
-      const ax = Math.min(x + L, s.x + s.L);
-      const ay = Math.min(y + W, s.y + s.W);
-      supportedArea += Math.max(0, ax - ix) * Math.max(0, ay - iy);
-    }
-    if (supportedArea / baseArea < box.supportRatioMin - EPSILON) return false;
-
-    // 4. Top-load weight check on each supporter chain
-    for (const s of supporters) {
-      const topLoad = computeTopLoad(s, placed) + box.weightKg;
-      const supporterCargo = placed.find((p) => p.instanceId === s.instanceId);
-      // We need the original maxLoadOnTopKg — store on placement
-      const limit = s.maxLoadOnTopKg ?? Infinity;
-      if (topLoad > limit + EPSILON) return false;
-    }
-
-    // 5. Max stack layers
-    const myLayer = computeLayer(x, y, z, L, W, placed) + 1;
-    if (myLayer > box.maxStackLayers) return false;
+  // Floor placement: no supporters to validate
+  if (z <= EPSILON) {
+    return { layer: 1, penalty: 0, supports: [], loadAdditions: EMPTY_MAP };
   }
 
-  return true;
+  // 3. nonStackable cargo travels on the floor only
+  if (box.nonStackable) return null;
+
+  // 4. Support: collect direct supporters + contact areas
+  const supporters = [];
+  let supportedArea = 0;
+  for (const p of placed) {
+    if (Math.abs(p.z + p.H - z) < EPSILON &&
+        rectanglesIntersect(x, y, L, W, p.x, p.y, p.L, p.W)) {
+      const ix = Math.max(x, p.x);
+      const iy = Math.max(y, p.y);
+      const ax = Math.min(x + L, p.x + p.L);
+      const ay = Math.min(y + W, p.y + p.W);
+      const area = Math.max(0, ax - ix) * Math.max(0, ay - iy);
+      supporters.push({ p, area });
+      supportedArea += area;
+    }
+  }
+  if (supporters.length === 0) return null;
+
+  // 5. Nothing may rest on a non-stackable box
+  for (const s of supporters) {
+    if (s.p.nonStackable) return null;
+  }
+
+  // 6. Support ratio (bottom area covered)
+  if (supportedArea / (L * W) < box.supportRatioMin - EPSILON) return null;
+
+  // 7. Max stack layers (layer is cached on each placement; floor = 1)
+  let layer = 1;
+  for (const s of supporters) layer = Math.max(layer, s.p.layer + 1);
+  if (layer > box.maxStackLayers) return null;
+
+  // 8. Top-load along the whole support chain: distribute the box's weight
+  // to supporters proportionally to contact area, propagate transitively,
+  // and verify every affected box's maxLoadOnTopKg.
+  let loadAdditions = EMPTY_MAP;
+  if (box.weightKg > 0) {
+    loadAdditions = new Map();
+    for (const s of supporters) {
+      loadAdditions.set(s.p, (loadAdditions.get(s.p) ?? 0) + box.weightKg * (s.area / supportedArea));
+    }
+    // Collect the affected sub-graph, then propagate in z-descending order
+    // (a supporter always sits strictly lower than what it carries), so each
+    // node's inflow is complete before it is pushed further down.
+    const seen = new Set(supporters.map((s) => s.p));
+    const stack = [...seen];
+    while (stack.length) {
+      const p = stack.pop();
+      for (const sub of p.supports) {
+        if (!seen.has(sub.p)) { seen.add(sub.p); stack.push(sub.p); }
+      }
+    }
+    const ordered = [...seen].sort((a, b) => b.z - a.z);
+    for (const p of ordered) {
+      const kg = loadAdditions.get(p) ?? 0;
+      if (kg <= 0) continue;
+      for (const sub of p.supports) {
+        loadAdditions.set(sub.p, (loadAdditions.get(sub.p) ?? 0) + kg * sub.f);
+      }
+    }
+    for (const [p, addKg] of loadAdditions) {
+      if (p.carriedKg + addKg > p.maxLoadOnTopKg + EPSILON) return null;
+    }
+  }
+
+  // 9. Pyramid preference (soft): avoid resting on any lighter box
+  const penalty = supporters.some((s) => box.weightKg > s.p.weightKg + EPSILON) ? 1 : 0;
+
+  return {
+    layer,
+    penalty,
+    supports: supporters.map((s) => ({ p: s.p, f: s.area / supportedArea })),
+    loadAdditions,
+  };
 }
+
+const EMPTY_MAP = new Map();
 
 function intersects(x1, y1, z1, L1, W1, H1, x2, y2, z2, L2, W2, H2) {
   return (
@@ -336,35 +427,20 @@ function rectanglesIntersect(x1, y1, L1, W1, x2, y2, L2, W2) {
   );
 }
 
-function computeTopLoad(supporter, placed) {
-  // Sum weight of all boxes resting (directly or transitively) on supporter
-  let load = 0;
-  const above = placed.filter(
-    (p) => Math.abs(p.z - (supporter.z + supporter.H)) < EPSILON &&
-           rectanglesIntersect(supporter.x, supporter.y, supporter.L, supporter.W, p.x, p.y, p.L, p.W)
-  );
-  for (const a of above) {
-    load += a.weightKg + computeTopLoad(a, placed);
+/** Highest solid surface under point (x, y) at or below height z (floor = 0). */
+function projectDown(x, y, z, placements) {
+  let top = 0;
+  for (const p of placements) {
+    if (p.z + p.H <= z + EPSILON &&
+        x >= p.x - EPSILON && x < p.x + p.L - EPSILON &&
+        y >= p.y - EPSILON && y < p.y + p.W - EPSILON) {
+      top = Math.max(top, p.z + p.H);
+    }
   }
-  return load;
+  return top;
 }
 
-function computeLayer(x, y, z, L, W, placed) {
-  // Count vertical stack height beneath (x,y,L,W) at z
-  if (z < EPSILON) return 0;
-  const supporters = placed.filter(
-    (p) => Math.abs(p.z + p.H - z) < EPSILON &&
-           rectanglesIntersect(x, y, L, W, p.x, p.y, p.L, p.W)
-  );
-  let maxBelow = 0;
-  for (const s of supporters) {
-    const sLayer = computeLayer(s.x, s.y, s.z, s.L, s.W, placed) + 1;
-    maxBelow = Math.max(maxBelow, sLayer);
-  }
-  return maxBelow;
-}
-
-function updateExtremePoints(currentEPs, placement) {
+function updateExtremePoints(currentEPs, placement, placements, internal) {
   const { x, y, z, L, W, H } = placement;
   const newPoints = [
     { x: x + L, y, z },
@@ -372,8 +448,16 @@ function updateExtremePoints(currentEPs, placement) {
     { x, y, z: z + H },
   ];
 
+  // Project the two side points down onto the nearest solid surface (or the
+  // floor). Without this, side EPs of an elevated box hang in mid-air and a
+  // usable spot below them is never tried.
+  for (const pt of [{ x: x + L, y, z }, { x, y: y + W, z }]) {
+    const zp = projectDown(pt.x, pt.y, pt.z, placements);
+    if (zp < pt.z - EPSILON) newPoints.push({ x: pt.x, y: pt.y, z: zp });
+  }
+
   // Remove EPs covered by the new placement
-  const filtered = currentEPs.filter((ep) => {
+  const result = currentEPs.filter((ep) => {
     return !(
       ep.x >= x - EPSILON && ep.x < x + L - EPSILON &&
       ep.y >= y - EPSILON && ep.y < y + W - EPSILON &&
@@ -381,9 +465,11 @@ function updateExtremePoints(currentEPs, placement) {
     );
   });
 
-  // Add new, dedupe
-  const result = [...filtered];
+  // Add new, dedupe; skip points on/outside container faces (nothing fits there)
   for (const np of newPoints) {
+    if (np.x >= internal.length - EPSILON ||
+        np.y >= internal.width - EPSILON ||
+        np.z >= internal.height - EPSILON) continue;
     if (!result.some((ep) => Math.abs(ep.x - np.x) < EPSILON && Math.abs(ep.y - np.y) < EPSILON && Math.abs(ep.z - np.z) < EPSILON)) {
       result.push(np);
     }

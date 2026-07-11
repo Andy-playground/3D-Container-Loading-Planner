@@ -2,7 +2,7 @@
 
 const DEMO = {
   containerId: 'OCEAN_40HQ',
-  nextCargoId: 4,
+  nextCargoId: 5,
   cargoTypes: [
     {
       id: 'C1', name: 'Tacmac SW8', length: 120, width: 25, height: 80,
@@ -26,6 +26,16 @@ const DEMO = {
       rotatable: { yaw: true, pitch: false, roll: false },
       thisSideUp: true,
       maxStackLayers: 99, maxLoadOnTopKg: 180, supportRatioMin: 0.8,
+      priority: 'normal',
+    },
+    {
+      // 打棧板的輪組：不可堆疊 → 僅放地面、上方不放貨
+      id: 'C4', name: 'Wheelset Pallet', length: 120, width: 100, height: 130,
+      weightKg: 180, quantity: 4, color: '#f39c12',
+      rotatable: { yaw: true, pitch: false, roll: false },
+      thisSideUp: true,
+      maxStackLayers: 1, maxLoadOnTopKg: 0, supportRatioMin: 0.8,
+      nonStackable: true,
       priority: 'normal',
     },
   ],
