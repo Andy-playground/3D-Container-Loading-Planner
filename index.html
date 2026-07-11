@@ -4,12 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title data-i18n="title">3D Container Loading Planner</title>
-  <link rel="stylesheet" href="styles/main.css?v=8">
+  <link rel="stylesheet" href="styles/main.css?v=9">
 </head>
 <body>
   <div id="topbar">
-    <button id="packBtn" data-i18n="pack">▶ 裝載</button>
+    <button id="packBtn" data-i18n="pack">裝載</button>
     <button id="clearBtn" class="danger" data-i18n="clear">清除</button>
+    <span class="tb-sep"></span>
     <button id="importBtn" class="secondary" data-i18n="importJson">匯入 JSON</button>
     <button id="exportBtn" class="secondary" data-i18n="exportJson">匯出 JSON</button>
 
@@ -24,6 +25,7 @@
     </div>
 
     <button id="demoBtn" class="secondary" data-i18n="loadDemo">載入示範</button>
+    <span class="tb-sep"></span>
     <button id="langBtn" class="secondary" data-i18n="lang">Language</button>
     <input type="file" id="importFile" accept=".json" style="display:none">
     <div id="stats" data-i18n="notPackedYet">尚未裝載</div>
@@ -216,6 +218,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/app.js?v=9"></script>
+  <script type="module" src="src/app.js?v=10"></script>
 </body>
 </html>

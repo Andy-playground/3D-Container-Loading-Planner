@@ -7,7 +7,7 @@ const STORAGE_KEY = 'clp:lang';
 const dict = {
   'zh-Hant': {
     title: '3D 貨櫃裝載規劃器',
-    pack: '▶ 裝載',
+    pack: '裝載',
     clear: '清除',
     importJson: '匯入 JSON',
     exportJson: '匯出 JSON',
@@ -167,7 +167,7 @@ const dict = {
   },
   'en': {
     title: '3D Container Loading Planner',
-    pack: '▶ Pack',
+    pack: 'Pack',
     clear: 'Clear',
     importJson: 'Import JSON',
     exportJson: 'Export JSON',

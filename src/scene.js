@@ -12,6 +12,15 @@ let boxesGroup;           // all rendered boxes
 let cogGroup;             // center-of-gravity markers + axle indicators
 let canvasEl;
 let dirLight;             // shadow-casting key light (refit per render)
+let hemiLight;            // sky/ground fill light (ground color follows theme)
+
+// Scene palette follows the OS light/dark appearance, matching the CSS --bg token.
+const SCENE_THEMES = {
+  light: { bg: 0xe5eaf0, hemiGround: 0xb8c4cc, floor: 0xd6dce4, gridMajor: 0xbcc4cf, gridMinor: 0xd4dae2 },
+  dark:  { bg: 0x161619, hemiGround: 0x30303a, floor: 0x242429, gridMajor: 0x42424c, gridMinor: 0x2e2e35 },
+};
+let sceneTheme = SCENE_THEMES.light;
+let lastGroundDims = null; // { totalLen, maxW } — lets a theme switch re-draw the ground
 let boxShadows = true;    // disabled automatically on very large plans
 let opacity = 1.0;
 let labelsVisible = true;
@@ -41,8 +50,12 @@ function cancelTweens() {
 export function initScene(canvasContainerEl) {
   canvasEl = canvasContainerEl;
 
+  const darkMq = window.matchMedia?.('(prefers-color-scheme: dark)');
+  sceneTheme = darkMq?.matches ? SCENE_THEMES.dark : SCENE_THEMES.light;
+  darkMq?.addEventListener?.('change', (e) => applySceneTheme(e.matches));
+
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xdfe7ef);
+  scene.background = new THREE.Color(sceneTheme.bg);
 
   const w = canvasEl.clientWidth;
   const h = canvasEl.clientHeight;
@@ -61,7 +74,8 @@ export function initScene(canvasContainerEl) {
   controls.dampingFactor = 0.08;
   controls.zoomSpeed = 2.0;
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xb8c4cc, 0.9));
+  hemiLight = new THREE.HemisphereLight(0xffffff, sceneTheme.hemiGround, 0.9);
+  scene.add(hemiLight);
   scene.add(new THREE.AmbientLight(0xffffff, 0.25));
   dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
   dirLight.position.set(500, 900, 700);
@@ -327,6 +341,7 @@ function fitShadowCamera(totalLen, maxW, maxH) {
 
 // ===== Ground (floor + grid) =====
 function drawGround(totalLen, maxW) {
+  lastGroundDims = { totalLen, maxW };
   const sizeX = totalLen + 600;
   const sizeZ = Math.max(maxW, 600) * 4;
   const centerX = totalLen / 2;
@@ -334,7 +349,7 @@ function drawGround(totalLen, maxW) {
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(sizeX, sizeZ),
-    new THREE.MeshStandardMaterial({ color: 0xd3dae1, side: THREE.DoubleSide, roughness: 0.95 })
+    new THREE.MeshStandardMaterial({ color: sceneTheme.floor, side: THREE.DoubleSide, roughness: 0.95 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(centerX, -0.5, centerZ);
@@ -342,9 +357,19 @@ function drawGround(totalLen, maxW) {
   groundGroup.add(floor);
 
   const gridDivX = Math.max(20, Math.round(sizeX / 50));
-  const grid = new THREE.GridHelper(Math.max(sizeX, sizeZ), Math.max(gridDivX, 20), 0xbbbbbb, 0xdddddd);
+  const grid = new THREE.GridHelper(Math.max(sizeX, sizeZ), Math.max(gridDivX, 20), sceneTheme.gridMajor, sceneTheme.gridMinor);
   grid.position.set(centerX, 0, centerZ);
   groundGroup.add(grid);
+}
+
+function applySceneTheme(dark) {
+  sceneTheme = dark ? SCENE_THEMES.dark : SCENE_THEMES.light;
+  scene.background.setHex(sceneTheme.bg);
+  hemiLight.groundColor.setHex(sceneTheme.hemiGround);
+  if (lastGroundDims) {
+    disposeGroup(groundGroup);
+    drawGround(lastGroundDims.totalLen, lastGroundDims.maxW);
+  }
 }
 
 // ===== Container: realistic shell (corrugated walls, plywood floor, swing doors) =====
