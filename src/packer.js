@@ -40,6 +40,7 @@ export function pack(cargoTypes, containerSpec, options = {}) {
         maxLoadOnTopKg: c.maxLoadOnTopKg ?? Infinity,
         supportRatioMin: c.supportRatioMin ?? 0.8,
         priority: c.priority ?? 'normal',
+        nonStackable: (c.maxStackLayers ?? 99) <= 1,
         groupSameSku: c.groupSameSku ?? false,
       });
     }
@@ -362,9 +363,11 @@ function canPlace(ep, orient, box, placed, container) {
     if (supporters.some((s) => s.nonStackable)) return false;
 
     // 5. Max stack layers — the new layer may exceed neither this box's
-    // limit nor that of any box beneath it in the stack.
+    // limit nor that of any box beneath it in the stack. A DO NOT STACK box
+    // (limit 1) only forbids cargo on top of it (check 4); it may itself be
+    // top-loaded onto stackable cargo.
     const myLayer = computeLayer(x, y, z, L, W, placed) + 1;
-    if (myLayer > box.maxStackLayers) return false;
+    if (!box.nonStackable && myLayer > box.maxStackLayers) return false;
     if (stackBelow(supporters, placed).some((s) => myLayer > s.maxStackLayers)) return false;
   }
 

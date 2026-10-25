@@ -506,6 +506,31 @@ console.log('T20: 優先避開超壓位置');
   console.log(`  → 重箱放在耐壓箱上 (x=${P.H.x})，無超壓`);
 }
 
+// ===== T21: A DO NOT STACK box may itself be top-loaded onto stackable cargo =====
+console.log('T21: DO NOT STACK 可放在其他貨物最上層');
+{
+  const C = { id: 'T', mode: 'custom', internal: { length: 100, width: 100, height: 300 }, payloadKg: 99999 };
+  const base = { length: 100, width: 100, height: 50, weightKg: 10, quantity: 1, color: '#888',
+    rotatable: { yaw: false, pitch: false, roll: false }, thisSideUp: true };
+  const r = pack([
+    { ...base, id: 'S', name: 'Stackable', quantity: 2, priority: 'urgent' },
+    { ...base, id: 'X', name: 'NoStack', maxStackLayers: 1 },
+    { ...base, id: 'N', name: 'N' },
+  ], C, { allowMultiContainer: false });
+  const P = r.containers[0].placements;
+  const x = P.find((p) => p.cargoId === 'X');
+  assert(x && x.z === 100, `T21: DO NOT STACK box should sit on top of the 2 stackable boxes, z=${x?.z}`);
+  assert(!P.some((p) => p.z > x.z), 'T21: nothing may be placed above the DO NOT STACK box');
+  // Lower boxes' layer limits still apply
+  const r2 = pack([
+    { ...base, id: 'B', name: 'Base', maxStackLayers: 2, priority: 'urgent' },
+    { ...base, id: 'S', name: 'S', priority: 'urgent' },
+    { ...base, id: 'X', name: 'NoStack', maxStackLayers: 1 },
+  ], C, { allowMultiContainer: false });
+  assert(r2.containers[0].placements.length === 2, 'T21: base limited to 2 layers rejects a 3rd-layer DO NOT STACK box');
+  console.log(`  → DO NOT STACK 放在第 3 層 (z=${x.z})，上方無貨物`);
+}
+
 // ===== Summary =====
 console.log('\n========================');
 console.log(`通過: ${passed}, 失敗: ${failed}`);
