@@ -39,7 +39,10 @@ function fmtRot(p) {
   return parts.length ? parts.join(',') : '0';
 }
 
-const REASON_KEYS = { oversize: 'reasonOversize', overweight: 'reasonOverweight', nospace: 'reasonNospace' };
+const REASON_KEYS = {
+  oversize: 'reasonOversize', door: 'reasonDoor', overweight: 'reasonOverweight',
+  payloadFull: 'reasonPayloadFull', nospace: 'reasonNospace',
+};
 
 function fmtReasons(u) {
   const parts = Object.entries(u.reasons ?? {}).map(([r, n]) => `${t(REASON_KEYS[r] ?? r)}×${n}`);
@@ -78,6 +81,9 @@ export function exportTXT(result, containerSpec, meta = {}) {
     if (ct.lateral && !ct.lateral.ok) {
       lines.push(`${t('lateralWarn')}: ${t('lateralOffset')} ${ct.lateral.offsetCm.toFixed(1)} cm`);
     }
+    for (const o of ct.stats.overloaded ?? []) {
+      lines.push(`${t('overloadWarn')}: #${o.loadSeq} ${o.name} ${o.topLoadKg.toFixed(0)}/${o.limitKg} kg (${t('overloadHint')})`);
+    }
     lines.push('');
     // Items in physical loading order (back of container first)
     const ordered = [...ct.placements].sort((a, b) => (a.loadSeq ?? 0) - (b.loadSeq ?? 0));
@@ -85,7 +91,7 @@ export function exportTXT(result, containerSpec, meta = {}) {
       lines.push(`${p.loadSeq ?? '?'}. ${p.name}`);
       lines.push(`   Position: X=${p.x.toFixed(0)}cm, Y=${p.y.toFixed(0)}cm, Z=${p.z.toFixed(0)}cm`);
       lines.push(`   Dimensions: ${p.L}×${p.W}×${p.H}cm`);
-      lines.push(`   Weight: ${(p.weightKg ?? 0)}kg  Orientation: ${fmtRot(p)}`);
+      lines.push(`   Weight: ${(p.weightKg ?? 0)}kg  Orientation: ${fmtRot(p)}${p.overloaded ? `  ${t('overloadWarn')} ${p.topLoadKg.toFixed(0)}/${p.maxLoadOnTopKg} kg` : ''}`);
     }
     lines.push('');
   }
@@ -111,7 +117,7 @@ export function exportCSV(result, containerSpec, meta = {}) {
     return;
   }
   const rows = [];
-  rows.push(['load_seq', 'name', 'container', 'x_cm', 'y_cm', 'z_cm', 'L_cm', 'W_cm', 'H_cm', 'weight_kg', 'orientation']);
+  rows.push(['load_seq', 'name', 'container', 'x_cm', 'y_cm', 'z_cm', 'L_cm', 'W_cm', 'H_cm', 'weight_kg', 'orientation', 'top_load_kg', 'top_load_limit_kg', 'overloaded']);
   for (let i = 0; i < result.containers.length; i++) {
     const ct = result.containers[i];
     const ordered = [...ct.placements].sort((a, b) => (a.loadSeq ?? 0) - (b.loadSeq ?? 0));
@@ -128,6 +134,9 @@ export function exportCSV(result, containerSpec, meta = {}) {
         p.H,
         p.weightKg ?? 0,
         fmtRot(p),
+        (p.topLoadKg ?? 0).toFixed(1),
+        p.maxLoadOnTopKg === Infinity || p.maxLoadOnTopKg == null ? '' : p.maxLoadOnTopKg,
+        p.overloaded ? 'YES' : '',
       ]);
     }
   }
@@ -217,6 +226,8 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
     if (c.rotatable?.pitch || c.rotatable?.roll) o.push(t('optFlip'));
     if (c.priority === 'urgent') o.push(t('optUrgent'));
     if (c.priority === 'lifo') o.push(t('optLifo'));
+    if (c.floorOnly) o.push(t('optFloorOnly'));
+    if (c.sameCargoOnTop) o.push(t('optSameOnTop'));
     if (c.groupSameSku) o.push(t('optGroup'));
     return o.map((x) => `<span class="opt">${esc(x)}</span>`).join(' ');
   };
@@ -291,6 +302,9 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
     const lateral = ct.lateral && !ct.lateral.ok
       ? ` <span class="warn">${t('lateralWarn')}</span>`
       : '';
+    const overload = ct.stats.overloaded?.length
+      ? ` <span class="warn">${t('overloadWarn')} ×${ct.stats.overloaded.length}</span>`
+      : '';
     return `
       <tr>
         <td>${i + 1}</td>
@@ -298,7 +312,7 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
         <td>${(ct.stats.volumeUtilization * 100).toFixed(1)}%</td>
         <td>${ct.stats.usedWeightKg.toFixed(0)} / ${ct.stats.payloadKg}</td>
         <td>${cog}</td>
-        <td>${axle}${lateral}</td>
+        <td>${axle}${lateral}${overload}</td>
       </tr>`;
   }).join('');
 

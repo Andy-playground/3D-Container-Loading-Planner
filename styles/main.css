@@ -224,6 +224,7 @@ input[type=range] { accent-color: var(--accent); }
 #stats .ok { color: var(--green); }
 #stats .container-stat { color: var(--label-secondary); }
 #stats .container-stat.warn { color: var(--red); }
+.d-row.warn { color: var(--red); font-weight: 600; }
 #stats .container-stat.ok { color: var(--green); }
 
 /* ===== Dropdown — anchored to its trigger, scales from it (not its center) ===== */

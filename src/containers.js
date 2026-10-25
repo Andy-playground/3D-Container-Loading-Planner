@@ -1,5 +1,7 @@
 // Preset container definitions per SDD §6.2
 // All dimensions in cm, weight in kg
+// Ocean values (internal, door opening, payload) per "Container size.pdf";
+// `door` is optional — containers without it get no door-opening check.
 
 export const CONTAINERS = [
   // ===== Ocean =====
@@ -9,6 +11,7 @@ export const CONTAINERS = [
     type: '20GP',
     label: '20ft 標準櫃 (20GP)',
     internal: { length: 589.6, width: 235.0, height: 239.3 },
+    door: { width: 235.0, height: 227.4 },
     payloadKg: 28200,
   },
   {
@@ -17,7 +20,8 @@ export const CONTAINERS = [
     type: '40GP',
     label: '40ft 標準櫃 (40GP)',
     internal: { length: 1203.2, width: 235.0, height: 239.3 },
-    payloadKg: 26700,
+    door: { width: 234.0, height: 227.4 },
+    payloadKg: 28800,
   },
   {
     id: 'OCEAN_40HQ',
@@ -25,14 +29,16 @@ export const CONTAINERS = [
     type: '40HQ',
     label: '40ft 高櫃 (40HQ)',
     internal: { length: 1203.2, width: 235.0, height: 269.7 },
-    payloadKg: 26500,
+    door: { width: 234.0, height: 257.7 },
+    payloadKg: 28620,
   },
   {
     id: 'OCEAN_45HQ',
     mode: 'ocean',
     type: '45HQ',
     label: '45ft 高櫃 (45HQ)',
-    internal: { length: 1355.5, width: 235.0, height: 269.7 },
+    internal: { length: 1355.6, width: 235.2, height: 269.8 },
+    door: { width: 234.0, height: 258.5 },
     payloadKg: 27600,
   },
 

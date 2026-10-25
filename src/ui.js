@@ -264,6 +264,8 @@ function readCargoForm() {
   const allowRoll = document.getElementById('cargoRoll').checked;
   const thisSideUp = document.getElementById('cargoThisSideUp').checked;
   const groupSameSku = document.getElementById('cargoGroupSku')?.checked ?? false;
+  const floorOnly = document.getElementById('cargoFloorOnly')?.checked ?? false;
+  const sameCargoOnTop = document.getElementById('cargoSameOnTop')?.checked ?? false;
   const priority = document.getElementById('cargoPriority').value;
 
   if (!isFinite(length) || !isFinite(width) || !isFinite(height) || !isFinite(quantity) ||
@@ -277,6 +279,7 @@ function readCargoForm() {
     rotatable: { yaw: allowYaw, pitch: allowPitch, roll: allowRoll },
     thisSideUp,
     maxStackLayers, maxLoadOnTopKg, supportRatioMin,
+    floorOnly, sameCargoOnTop,
     groupSameSku,
     priority,
   };
@@ -299,6 +302,10 @@ function fillCargoForm(c) {
   document.getElementById('cargoThisSideUp').checked = !!c.thisSideUp;
   const gs = document.getElementById('cargoGroupSku');
   if (gs) gs.checked = !!c.groupSameSku;
+  const fo = document.getElementById('cargoFloorOnly');
+  if (fo) fo.checked = !!c.floorOnly;
+  const so = document.getElementById('cargoSameOnTop');
+  if (so) so.checked = !!c.sameCargoOnTop;
   document.getElementById('cargoPriority').value = c.priority ?? 'normal';
 }
 
@@ -359,14 +366,16 @@ function bindCsvImport() {
   document.getElementById('csvTemplateBtn')?.addEventListener('click', downloadCsvTemplate);
 }
 
-const CSV_COLUMNS = ['name', 'length_cm', 'width_cm', 'height_cm', 'weight_kg', 'quantity', 'color', 'max_stack_layers', 'max_load_on_top_kg', 'this_side_up', 'priority'];
+const CSV_COLUMNS = ['name', 'length_cm', 'width_cm', 'height_cm', 'weight_kg', 'quantity', 'color', 'max_stack_layers', 'max_load_on_top_kg', 'this_side_up', 'priority', 'floor_only', 'same_cargo_on_top'];
 
 function downloadCsvTemplate() {
   const rows = [
     CSV_COLUMNS.join(','),
-    'Cargo A,100,80,60,10,20,#3498db,99,500,1,normal',
-    'Cargo B,120,100,90,25,8,#e74c3c,3,200,1,urgent',
-    'Fragile C,60,40,40,5,30,#2ecc71,1,0,1,lifo',
+    'Cargo A,100,80,60,10,20,#3498db,99,500,1,normal,0,0',
+    'Cargo B,120,100,90,25,8,#e74c3c,3,200,1,urgent,0,0',
+    'Fragile C,60,40,40,5,30,#2ecc71,99,50,1,lifo,0,0',
+    'Wheelset pallet,120,100,150,80,6,#9b59b6,1,,1,normal,1,0',
+    'Li-ion battery carton,40,30,25,12,60,#f39c12,99,,1,normal,0,1',
   ];
   const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -432,6 +441,7 @@ function parseCargoCSV(text) {
       continue;
     }
     const tsu = (col(row, 'this_side_up') ?? '1').toLowerCase();
+    const yes = (k) => ['1', 'true', 'yes', 'y'].includes((col(row, k) ?? '').toLowerCase());
     rows.push({
       line,
       error: null,
@@ -449,6 +459,8 @@ function parseCargoCSV(text) {
           return isFinite(v) ? v : Infinity;
         })(),
         supportRatioMin: 0.8,
+        floorOnly: yes('floor_only'),
+        sameCargoOnTop: yes('same_cargo_on_top'),
         groupSameSku: false,
         priority: ['normal', 'urgent', 'lifo'].includes((col(row, 'priority') ?? '').toLowerCase())
           ? col(row, 'priority').toLowerCase() : 'normal',
@@ -594,7 +606,8 @@ export function showDetails(p) {
     <div class="d-row"><span>${t('orientation')}</span>${rotLabel}</div>
     <div class="d-row"><span>${t('weight')}</span>${p.weightKg ?? 0} kg</div>
     <div class="d-row"><span>${t('topLoadLimit')}</span>${p.maxLoadOnTopKg === Infinity || p.maxLoadOnTopKg == null ? '∞' : p.maxLoadOnTopKg + ' kg'}</div>
-    <div class="d-row"><span>${t('constraints')}</span>${p.thisSideUp ? '↑' : ''} ${p.nonStackable ? '⊘' : ''}</div>
+    <div class="d-row${p.overloaded ? ' warn' : ''}"><span>${t('topLoadActual')}</span>${(p.topLoadKg ?? 0).toFixed(0)} kg${p.overloaded ? ` ${t('overloadWarn')}` : ''}</div>
+    <div class="d-row"><span>${t('constraints')}</span>${[p.thisSideUp ? '↑' : '', p.nonStackable ? '⊘' : '', p.floorOnly ? t('optFloorOnly') : '', p.sameCargoOnTop ? t('optSameOnTop') : ''].filter(Boolean).join(' · ')}</div>
   `;
   panel.style.display = 'block';
 }
@@ -638,6 +651,7 @@ function renderContainerInfo() {
   if (c) {
     info.innerHTML = `
       <div>${c.internal.length} × ${c.internal.width} × ${c.internal.height} cm</div>
+      ${c.door ? `<div>${t('door')} ${c.door.width} × ${c.door.height} cm</div>` : ''}
       <div>≤ ${c.payloadKg.toLocaleString()} kg</div>
     `;
   }
@@ -669,7 +683,7 @@ function renderCargoList() {
       <div class="cargo-info">
         <div class="cargo-name">${escapeHtml(c.name)} <span class="qty">×${c.quantity}</span> ${priorityBadge}</div>
         <div class="cargo-meta">${c.length}×${c.width}×${c.height}cm · ${c.weightKg}kg</div>
-        <div class="cargo-meta">≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · top≤${c.maxLoadOnTopKg === Infinity ? '∞' : c.maxLoadOnTopKg}kg · ${rotAxes.join('') || '—'}${c.thisSideUp ? ' ·↑' : ''}${c.groupSameSku ? ' ·▦' : ''}</div>
+        <div class="cargo-meta">≤${c.maxStackLayers === 99 ? '∞' : c.maxStackLayers} · top≤${c.maxLoadOnTopKg === Infinity ? '∞' : c.maxLoadOnTopKg}kg · ${rotAxes.join('') || '—'}${c.thisSideUp ? ' ·↑' : ''}${c.floorOnly ? ` ·${t('optFloorOnly')}` : ''}${c.sameCargoOnTop ? ` ·${t('optSameOnTop')}` : ''}${c.groupSameSku ? ' ·▦' : ''}</div>
       </div>
       <div class="row-actions">
         <button class="icon-btn eye-btn" data-id="${c.id}" title="${t('hideTitle')}">${hidden ? '🙈' : '👁'}</button>
@@ -722,7 +736,10 @@ function renderCargoList() {
   });
 }
 
-const REASON_KEYS = { oversize: 'reasonOversize', overweight: 'reasonOverweight', nospace: 'reasonNospace' };
+const REASON_KEYS = {
+  oversize: 'reasonOversize', door: 'reasonDoor', overweight: 'reasonOverweight',
+  payloadFull: 'reasonPayloadFull', nospace: 'reasonNospace',
+};
 
 export function renderStats(result, containerSpec, meta = {}) {
   const el = document.getElementById('stats');
@@ -754,6 +771,20 @@ export function renderStats(result, containerSpec, meta = {}) {
     html += `<div class="container-stat">${line}</div>`;
     if (ct.lateral && !ct.lateral.ok) {
       html += `<div class="container-stat warn">↳ ${t('lateralWarn')} (${t('lateralOffset')} ${ct.lateral.offsetCm.toFixed(0)}cm)</div>`;
+    }
+    if (ct.stats.overloaded?.length) {
+      // Grouped per cargo (count + worst case) — per-box detail is in the
+      // details panel, the TXT/CSV export and the red outline in 3D.
+      const byCargo = new Map();
+      for (const o of ct.stats.overloaded) {
+        const g = byCargo.get(o.cargoId) ?? { name: o.name, count: 0, maxKg: 0, limitKg: o.limitKg };
+        g.count++;
+        g.maxKg = Math.max(g.maxKg, o.topLoadKg);
+        byCargo.set(o.cargoId, g);
+      }
+      const list = [...byCargo.values()]
+        .map((g) => `${escapeHtml(g.name)} ×${g.count} (≤${g.maxKg.toFixed(0)}/${g.limitKg}kg)`).join('、');
+      html += `<div class="container-stat warn">↳ ${t('overloadWarn')} ×${ct.stats.overloaded.length}: ${list} (${t('overloadHint')})</div>`;
     }
     if (ct.axleLoads) {
       const a = ct.axleLoads;
@@ -799,6 +830,8 @@ function normalizeCargo(c) {
     maxStackLayers: Math.max(1, Math.round(numOr(c.maxStackLayers, 99))),
     maxLoadOnTopKg: Math.max(0, numOr(c.maxLoadOnTopKg, Infinity)),
     supportRatioMin: Math.min(1, Math.max(0, numOr(c.supportRatioMin, 0.8))),
+    floorOnly: c.floorOnly === true,
+    sameCargoOnTop: c.sameCargoOnTop === true,
     groupSameSku: c.groupSameSku ?? false,
     priority: ['normal', 'urgent', 'lifo'].includes(c.priority) ? c.priority : 'normal',
     visible: c.visible !== false,
