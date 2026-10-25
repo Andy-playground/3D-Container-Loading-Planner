@@ -68,7 +68,7 @@
 | US-1 | 物流規劃員 | 選擇貨櫃類型並輸入多種貨物 | 看到模擬裝載結果 |
 | US-2 | 業務 | 知道一批貨需要幾個貨櫃 | 報價給客戶 |
 | US-3 | 倉儲現場主管 | 看到每件貨物的 X/Y/Z 座標 | 指揮現場堆疊 |
-| US-4 | 規劃員 | 設定「易碎品不可堆疊」 | 避免破損 |
+| US-4 | 規劃員 | 設定「DO NOT STACK 不可堆疊」與易碎品頂壓上限（超限僅警告） | 避免破損 |
 | US-5 | 規劃員 | 標記「This Side Up」貨物 | 確保不被翻倒 |
 | US-6 | 規劃員 | 將計畫存檔，下次再開啟 | 重複利用 |
 | US-7 | 規劃員 | 匯出 JSON 給其他系統 | 整合 ERP/WMS |
@@ -403,7 +403,7 @@ for each box in sortedBoxes:
 | T1 | 單一 SKU 整齊裝載 | 基準利用率 |
 | T2 | 多 SKU 混裝 | 碰撞偵測正確性 |
 | T3 | 重量限制觸發換櫃 | payload 約束 |
-| T4 | 易碎品不可堆疊 | maxStackLayers=1 |
+| T4 | DO NOT STACK 不可堆疊 | maxStackLayers=1 |
 | T5 | 多貨櫃自動展開 | multi-bin |
 
 執行方式：`node tests/packer.test.js`，全 PASS 才允許 commit。

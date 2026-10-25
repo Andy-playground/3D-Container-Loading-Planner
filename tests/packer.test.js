@@ -97,14 +97,14 @@ console.log('T3: 重量限制觸發換櫃');
   console.log(`  → 使用 ${result.containers.length} 個貨櫃，每櫃重量 ${result.containers.map(ct=>ct.stats.usedWeightKg.toFixed(0)+'kg').join(', ')}`);
 }
 
-// ===== T4: Fragile boxes — non-stackable =====
-console.log('T4: 易碎品不可堆疊 (maxStackLayers=1)');
+// ===== T4: DO NOT STACK boxes — non-stackable =====
+console.log('T4: DO NOT STACK 不可堆疊 (maxStackLayers=1)');
 {
   const cargo = [{
-    id: 'FRAGILE', name: 'Fragile', length: 80, width: 60, height: 50,
+    id: 'NOSTACK', name: 'NoStack', length: 80, width: 60, height: 50,
     weightKg: 5, quantity: 100, color: '#ff0',
     rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
-    maxStackLayers: 1, maxLoadOnTopKg: 0, supportRatioMin: 0.8,
+    maxStackLayers: 1, maxLoadOnTopKg: 1000, supportRatioMin: 0.8,
   }];
   const c = getContainer('OCEAN_40HQ');
   const result = pack(cargo, c);
@@ -273,6 +273,7 @@ console.log('T10: 未裝載原因');
   assert(big && big.reasons.oversize === 2, `T10: reason should be oversize, got ${JSON.stringify(big?.reasons)}`);
   assert(heavy && heavy.reasons.overweight === 1, `T10: reason should be overweight, got ${JSON.stringify(heavy?.reasons)}`);
   assert(big.name === 'TooBig', 'T10: unplaced entry should carry cargo name');
+  assert(result.containers.length === 1, `T10: unplaceable cargo must not open extra empty containers, got ${result.containers.length}`);
   console.log(`  → oversize×${big.reasons.oversize}, overweight×${heavy.reasons.overweight}`);
 }
 
@@ -366,6 +367,125 @@ console.log('T14: i18n 鍵一致性');
   assert(missingInEn.length === 0, `T14: keys missing in en: ${missingInEn.join(', ')}`);
   assert(missingInZh.length === 0, `T14: keys missing in zh-Hant: ${missingInZh.join(', ')}`);
   console.log(`  → zh-Hant ${zh.length} 鍵 = en ${en.length} 鍵`);
+}
+
+// ===== T15: Load sequence — every supporter is loaded before what rests on it =====
+console.log('T15: 裝載順序 — 下方支撐箱先裝');
+{
+  let violations = 0, checked = 0;
+  const specs = getAllContainers().filter((c) => c.mode !== 'custom');
+  for (let k = 0; k < 6; k++) {
+    const cargo = [
+      { id: 'A', name: 'A', length: 56 + k * 7, width: 44, height: 37, weightKg: 8, quantity: 60, color: '#f00',
+        rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true, supportRatioMin: 0.6 },
+      { id: 'B', name: 'B', length: 93, width: 61 + k * 3, height: 52, weightKg: 20, quantity: 40, color: '#0f0',
+        rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true, supportRatioMin: 0.6 },
+    ];
+    const r = pack(cargo, specs[k % specs.length]);
+    for (const ct of r.containers) {
+      for (const p of ct.placements) {
+        if (p.z < 0.01) continue;
+        for (const s of ct.placements) {
+          const touches = Math.abs(s.z + s.H - p.z) < 0.001 &&
+            s.x + s.L > p.x + 0.001 && p.x + p.L > s.x + 0.001 &&
+            s.y + s.W > p.y + 0.001 && p.y + p.W > s.y + 0.001;
+          if (!touches) continue;
+          checked++;
+          if (s.loadSeq > p.loadSeq) violations++;
+        }
+      }
+    }
+  }
+  assert(checked > 0, 'T15: test produced no stacked boxes');
+  assert(violations === 0, `T15: ${violations} boxes are sequenced before their supporter`);
+  console.log(`  → 檢查 ${checked} 組支撐關係，違反 ${violations}`);
+}
+
+// ===== T16: Top-load limit is a warning, not a block (whole chain counted) =====
+console.log('T16: 頂壓超限只警告，並沿支撐鏈累計');
+{
+  const C = { id: 'T', mode: 'custom', internal: { length: 100, width: 100, height: 300 }, payloadKg: 99999 };
+  const base = { length: 100, width: 100, height: 50, quantity: 1, color: '#888',
+    rotatable: { yaw: false, pitch: false, roll: false }, thisSideUp: true };
+  const r = pack([
+    { ...base, id: 'A', name: 'A', weightKg: 10, maxLoadOnTopKg: 50, priority: 'urgent' },
+    { ...base, id: 'B', name: 'B', weightKg: 40, maxLoadOnTopKg: 1000 },
+    { ...base, id: 'C', name: 'C', weightKg: 30, priority: 'lifo' },
+  ], C, { allowMultiContainer: false });
+  const ct = r.containers[0];
+  const byId = Object.fromEntries(ct.placements.map((p) => [p.cargoId, p]));
+  assert(ct.placements.length === 3, `T16: overload must not block stacking, placed ${ct.placements.length}`);
+  assert(Math.abs(byId.A.topLoadKg - 70) < 0.01, `T16: A should carry B+C = 70kg, got ${byId.A?.topLoadKg}`);
+  assert(byId.A.overloaded === true, 'T16: A should be flagged overloaded');
+  assert(byId.B.overloaded === false, 'T16: B within limit should not be flagged');
+  assert(ct.stats.overloaded.length === 1 && ct.stats.overloaded[0].cargoId === 'A', 'T16: stats.overloaded should list A only');
+  // Limit 0 (e.g. fragile) is still only a warning, not a stacking ban
+  const r0 = pack([
+    { ...base, id: 'F', name: 'Fragile', weightKg: 5, maxLoadOnTopKg: 0, priority: 'urgent' },
+    { ...base, id: 'N', name: 'N', weightKg: 10 },
+  ], C, { allowMultiContainer: false });
+  assert(r0.containers[0].placements.length === 2, 'T16: top-load limit 0 must not block stacking');
+  assert(r0.containers[0].stats.overloaded.length === 1, 'T16: limit 0 with a box on top should warn');
+  // Load is shared by contact area when a box rests on two supporters
+  const r2 = pack([
+    { ...base, id: 'L', name: 'L', length: 50, weightKg: 1, quantity: 2, maxLoadOnTopKg: 100, priority: 'urgent' },
+    { ...base, id: 'T', name: 'Top', weightKg: 60 },
+  ], C, { allowMultiContainer: false });
+  const legs = r2.containers[0].placements.filter((p) => p.cargoId === 'L');
+  assert(legs.every((p) => Math.abs(p.topLoadKg - 30) < 0.01), `T16: 60kg on two equal supports → 30kg each, got ${legs.map((p) => p.topLoadKg)}`);
+  console.log(`  → A 頂壓 ${byId.A.topLoadKg}kg / 上限 50kg → 警告，仍裝載`);
+}
+
+// ===== T17: DO NOT STACK below a stack, and stack-layer limits of lower boxes =====
+console.log('T17: DO NOT STACK 上方不可放其他貨物；下層層數限制');
+{
+  const C = { id: 'T', mode: 'custom', internal: { length: 100, width: 100, height: 300 }, payloadKg: 99999 };
+  const base = { length: 100, width: 100, height: 50, weightKg: 10, color: '#888',
+    rotatable: { yaw: false, pitch: false, roll: false }, thisSideUp: true };
+  const r = pack([
+    { ...base, id: 'X', name: 'NoStack', quantity: 1, maxStackLayers: 1, priority: 'urgent' },
+    { ...base, id: 'N', name: 'N', quantity: 2 },
+  ], C, { allowMultiContainer: false });
+  const z = r.containers[0].placements.map((p) => p.z);
+  assert(z.length === 1 && z[0] === 0, `T17: nothing may be placed on a DO NOT STACK box, got z=${z}`);
+  const r2 = pack([
+    { ...base, id: 'B', name: 'Base', quantity: 1, maxStackLayers: 2, priority: 'urgent' },
+    { ...base, id: 'N', name: 'N', quantity: 3 },
+  ], C, { allowMultiContainer: false });
+  assert(r2.containers[0].placements.length === 2, `T17: stack on a 2-layer-limit base must stop at 2, got ${r2.containers[0].placements.length}`);
+  console.log('  → DO NOT STACK 上方 0 件；2 層限制整疊 2 層');
+}
+
+// ===== T18: Door opening is smaller than the interior =====
+console.log('T18: 櫃門開口檢查');
+{
+  const c = getContainer('OCEAN_20GP'); // interior 239.3 high, door 227.4 high
+  const tall = (h, extra = {}) => [{ id: 'T', name: 'Tall', length: 100, width: 100, height: h, weightKg: 50, quantity: 1,
+    color: '#888', rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true, ...extra }];
+  const r = pack(tall(235), c);
+  assert(r.containers[0].placements.length === 0, 'T18: 235cm-tall box cannot pass a 227.4cm door');
+  assert(r.unplaced[0]?.reasons.door === 1, `T18: reason should be door, got ${JSON.stringify(r.unplaced[0]?.reasons)}`);
+  const ok = pack(tall(225), c);
+  assert(ok.containers[0].placements.length === 1, 'T18: 225cm box should fit through the door');
+  // Laying it down (when allowed) gets it through
+  const flip = pack(tall(235, { thisSideUp: false, rotatable: { yaw: true, pitch: true, roll: true } }), c);
+  assert(flip.containers[0].placements.length === 1 && flip.containers[0].placements[0].H <= 227.4,
+    'T18: a flippable tall box should be laid down to pass the door');
+  console.log('  → 235cm 高箱被擋於櫃門；可翻轉時改為躺放');
+}
+
+// ===== T19: Payload-full reason and container specs per Container size.pdf =====
+console.log('T19: 載重已滿原因、櫃型規格');
+{
+  const c = getContainer('OCEAN_20GP');
+  const r = pack([{ id: 'H', name: 'Heavy', length: 100, width: 100, height: 100, weightKg: 10000, quantity: 3,
+    color: '#888', rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true }], c, { allowMultiContainer: false });
+  assert(r.unplaced[0]?.reasons.payloadFull === 1, `T19: third 10t box should be payloadFull, got ${JSON.stringify(r.unplaced[0]?.reasons)}`);
+  const spec = (id) => getContainer(id);
+  assert(spec('OCEAN_40GP').payloadKg === 28800, 'T19: 40GP payload 28,800 kg');
+  assert(spec('OCEAN_40HQ').payloadKg === 28620, 'T19: 40HQ payload 28,620 kg');
+  assert(spec('OCEAN_45HQ').internal.width === 235.2, 'T19: 45HQ internal width 235.2 cm');
+  console.log('  → payloadFull 原因正確；40GP/40HQ/45HQ 規格符合 PDF');
 }
 
 // ===== Summary =====

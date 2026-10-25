@@ -366,7 +366,8 @@ function downloadCsvTemplate() {
     CSV_COLUMNS.join(','),
     'Cargo A,100,80,60,10,20,#3498db,99,500,1,normal',
     'Cargo B,120,100,90,25,8,#e74c3c,3,200,1,urgent',
-    'Fragile C,60,40,40,5,30,#2ecc71,1,0,1,lifo',
+    'Fragile C,60,40,40,5,30,#2ecc71,99,50,1,lifo',
+    'No-stack D,80,60,50,15,10,#9b59b6,1,,1,normal',
   ];
   const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -594,6 +595,7 @@ export function showDetails(p) {
     <div class="d-row"><span>${t('orientation')}</span>${rotLabel}</div>
     <div class="d-row"><span>${t('weight')}</span>${p.weightKg ?? 0} kg</div>
     <div class="d-row"><span>${t('topLoadLimit')}</span>${p.maxLoadOnTopKg === Infinity || p.maxLoadOnTopKg == null ? '∞' : p.maxLoadOnTopKg + ' kg'}</div>
+    <div class="d-row${p.overloaded ? ' warn' : ''}"><span>${t('topLoadActual')}</span>${(p.topLoadKg ?? 0).toFixed(0)} kg${p.overloaded ? ` ${t('overloadWarn')}` : ''}</div>
     <div class="d-row"><span>${t('constraints')}</span>${p.thisSideUp ? '↑' : ''} ${p.nonStackable ? '⊘' : ''}</div>
   `;
   panel.style.display = 'block';
@@ -638,6 +640,7 @@ function renderContainerInfo() {
   if (c) {
     info.innerHTML = `
       <div>${c.internal.length} × ${c.internal.width} × ${c.internal.height} cm</div>
+      ${c.door ? `<div>${t('door')} ${c.door.width} × ${c.door.height} cm</div>` : ''}
       <div>≤ ${c.payloadKg.toLocaleString()} kg</div>
     `;
   }
@@ -722,7 +725,10 @@ function renderCargoList() {
   });
 }
 
-const REASON_KEYS = { oversize: 'reasonOversize', overweight: 'reasonOverweight', nospace: 'reasonNospace' };
+const REASON_KEYS = {
+  oversize: 'reasonOversize', door: 'reasonDoor', overweight: 'reasonOverweight',
+  payloadFull: 'reasonPayloadFull', nospace: 'reasonNospace',
+};
 
 export function renderStats(result, containerSpec, meta = {}) {
   const el = document.getElementById('stats');
@@ -754,6 +760,20 @@ export function renderStats(result, containerSpec, meta = {}) {
     html += `<div class="container-stat">${line}</div>`;
     if (ct.lateral && !ct.lateral.ok) {
       html += `<div class="container-stat warn">↳ ${t('lateralWarn')} (${t('lateralOffset')} ${ct.lateral.offsetCm.toFixed(0)}cm)</div>`;
+    }
+    if (ct.stats.overloaded?.length) {
+      // Grouped per cargo (count + worst case) — per-box detail is in the
+      // details panel, the TXT/CSV export and the red outline in 3D.
+      const byCargo = new Map();
+      for (const o of ct.stats.overloaded) {
+        const g = byCargo.get(o.cargoId) ?? { name: o.name, count: 0, maxKg: 0, limitKg: o.limitKg };
+        g.count++;
+        g.maxKg = Math.max(g.maxKg, o.topLoadKg);
+        byCargo.set(o.cargoId, g);
+      }
+      const list = [...byCargo.values()]
+        .map((g) => `${escapeHtml(g.name)} ×${g.count} (≤${g.maxKg.toFixed(0)}/${g.limitKg}kg)`).join('、');
+      html += `<div class="container-stat warn">↳ ${t('overloadWarn')} ×${ct.stats.overloaded.length}: ${list} (${t('overloadHint')})</div>`;
     }
     if (ct.axleLoads) {
       const a = ct.axleLoads;

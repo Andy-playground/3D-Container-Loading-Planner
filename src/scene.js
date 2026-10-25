@@ -616,10 +616,11 @@ function drawBox(p, offsetX) {
 
   // Outline
   const edges = new THREE.EdgesGeometry(geom);
+  // Overloaded boxes (top load > limit) get a red outline as a warning.
   const edgeMat = new THREE.LineBasicMaterial({
-    color: 0x222222,
+    color: p.overloaded ? 0xff3b30 : 0x222222,
     transparent: true,
-    opacity: opacity * 0.6,
+    opacity: p.overloaded ? 1 : opacity * 0.6,
   });
   const outline = new THREE.LineSegments(edges, edgeMat);
   outline.position.copy(mesh.position);
