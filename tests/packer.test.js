@@ -488,6 +488,24 @@ console.log('T19: 載重已滿原因、櫃型規格');
   console.log('  → payloadFull 原因正確；40GP/40HQ/45HQ 規格符合 PDF');
 }
 
+// ===== T20: Prefer a spot that overloads nothing; overload only when unavoidable =====
+console.log('T20: 優先避開超壓位置');
+{
+  const C = { id: 'T', mode: 'custom', internal: { length: 200, width: 100, height: 100 }, payloadKg: 99999 };
+  const base = { width: 100, height: 50, quantity: 1, color: '#888',
+    rotatable: { yaw: false, pitch: false, roll: false }, thisSideUp: true };
+  // Fragile at the back (x=0, preferred spot), sturdy beside it; heavy box must go on the sturdy one
+  const r = pack([
+    { ...base, id: 'F', name: 'Fragile', length: 100, weightKg: 5, maxLoadOnTopKg: 10, priority: 'urgent' },
+    { ...base, id: 'S', name: 'Sturdy', length: 100, weightKg: 5, maxLoadOnTopKg: 500, priority: 'urgent' },
+    { ...base, id: 'H', name: 'Heavy', length: 100, weightKg: 80, priority: 'lifo' },
+  ], C, { allowMultiContainer: false });
+  const P = Object.fromEntries(r.containers[0].placements.map((p) => [p.cargoId, p]));
+  assert(P.H && P.H.z === 50 && P.H.x === P.S.x, `T20: heavy box should sit on the sturdy box (H.x=${P.H?.x}, S.x=${P.S?.x})`);
+  assert(r.containers[0].stats.overloaded.length === 0, 'T20: no overload when an alternative exists');
+  console.log(`  → 重箱放在耐壓箱上 (x=${P.H.x})，無超壓`);
+}
+
 // ===== Summary =====
 console.log('\n========================');
 console.log(`通過: ${passed}, 失敗: ${failed}`);

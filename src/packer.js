@@ -2,6 +2,9 @@
 // Per SDD §8
 
 const EPSILON = 0.001;
+// Valid spots checked past the first one when looking for a spot that
+// overloads nothing below (see packOneContainer).
+const OVERLOAD_LOOKAHEAD = 40;
 
 /**
  * Pack cargo into containers.
@@ -89,10 +92,12 @@ export function pack(cargoTypes, containerSpec, options = {}) {
   }
 
   // 3c. Top-load warnings (advisory — overloading is common practice, the
-  // user decides). Each box's weight, plus what it carries, is shared among
-  // its supporters in proportion to contact area.
+  // user decides). topLoadKg is accumulated while packing: each box's weight
+  // is shared among its supporters by contact area, down the whole chain.
   for (const ct of containers) {
-    annotateTopLoads(ct.placements);
+    for (const p of ct.placements) {
+      p.overloaded = p.topLoadKg > (p.maxLoadOnTopKg ?? Infinity) + EPSILON;
+    }
     ct.stats.overloaded = ct.placements
       .filter((p) => p.overloaded)
       .map((p) => ({
@@ -211,40 +216,58 @@ function packOneContainer(boxes, container, containerNum) {
       }
     }
 
+    // Loaders avoid crushing cargo when they can: take the first spot that
+    // overloads nobody below; only if every valid spot would, accept the first
+    // valid one anyway (flagged as a warning in §3c — the user decides).
+    // The look-ahead past the first valid spot is bounded, as on the dock.
+    let fallback = null;
+    let choice = null;
+    let lookahead = OVERLOAD_LOOKAHEAD;
     for (const ep of sortedEPs) {
       for (const orient of orientations) {
-        if (canPlace(ep, orient, box, placements, container)) {
-          const placement = {
-            instanceId: box.instanceId,
-            cargoId: box.cargoId,
-            name: box.name,
-            color: box.color,
-            x: ep.x,
-            y: ep.y,
-            z: ep.z,
-            L: orient.L,
-            W: orient.W,
-            H: orient.H,
-            weightKg: box.weightKg,
-            maxLoadOnTopKg: box.maxLoadOnTopKg,
-            maxStackLayers: box.maxStackLayers,
-            thisSideUp: box.thisSideUp,
-            // DO NOT STACK marking. Fragile goods may still be stacked —
-            // their top-load limit only raises a warning (§3c).
-            nonStackable: box.maxStackLayers <= 1,
-            yaw: orient.yaw,
-            pitch: orient.pitch,
-            roll: orient.roll,
-            containerNum,
-          };
-          placements.push(placement);
-          totalWeight += box.weightKg;
-          extremePoints = updateExtremePoints(extremePoints, placement);
-          placed = true;
+        if (!canPlace(ep, orient, box, placements, container)) continue;
+        fallback ??= { ep, orient };
+        if (!wouldOverload(ep, orient, box.weightKg, placements)) {
+          choice = { ep, orient };
           break;
         }
+        if (--lookahead < 0) break;
       }
-      if (placed) break;
+      if (choice || lookahead < 0) break;
+    }
+    choice ??= fallback;
+
+    if (choice) {
+      const { ep, orient } = choice;
+      const placement = {
+        instanceId: box.instanceId,
+        cargoId: box.cargoId,
+        name: box.name,
+        color: box.color,
+        x: ep.x,
+        y: ep.y,
+        z: ep.z,
+        L: orient.L,
+        W: orient.W,
+        H: orient.H,
+        weightKg: box.weightKg,
+        maxLoadOnTopKg: box.maxLoadOnTopKg,
+        topLoadKg: 0,
+        maxStackLayers: box.maxStackLayers,
+        thisSideUp: box.thisSideUp,
+        // DO NOT STACK marking. Fragile goods may still be stacked —
+        // their top-load limit only raises a warning (§3c).
+        nonStackable: box.maxStackLayers <= 1,
+        yaw: orient.yaw,
+        pitch: orient.pitch,
+        roll: orient.roll,
+        containerNum,
+      };
+      placements.push(placement);
+      addTopLoad(placement, placements);
+      totalWeight += box.weightKg;
+      extremePoints = updateExtremePoints(extremePoints, placement);
+      placed = true;
     }
 
     if (!placed) {
@@ -408,23 +431,43 @@ function loadingOrder(placements) {
   return order;
 }
 
-// Sets p.topLoadKg (weight resting on p, directly or through boxes above)
-// and p.overloaded (topLoadKg > maxLoadOnTopKg) on every placement.
-function annotateTopLoads(placements) {
-  const carried = new Map(placements.map((p) => [p, 0]));
-  const topDown = [...placements].sort((a, b) => b.z - a.z);
-  for (const p of topDown) {
-    if (p.z <= EPSILON) continue;
-    const supporters = supportersOf(p, placements);
-    const areas = supporters.map((s) => contactArea(p, s));
+// Extra load each box below receives when `weight` comes to rest on
+// `supporters`: shared by contact area, passed down the support chain level
+// by level (highest first, so each box forwards its total share once).
+function loadDeltas(rect, weight, supporters, placed) {
+  const delta = new Map();
+  const share = (r, load, below) => {
+    const areas = below.map((s) => contactArea(r, s));
     const total = areas.reduce((a, b) => a + b, 0);
-    if (total <= 0) continue;
-    const load = p.weightKg + carried.get(p);
-    supporters.forEach((s, i) => carried.set(s, carried.get(s) + load * areas[i] / total));
+    if (total <= 0) return;
+    below.forEach((s, i) => delta.set(s, (delta.get(s) ?? 0) + load * areas[i] / total));
+  };
+  share(rect, weight, supporters);
+  const done = new Set();
+  for (;;) {
+    let top = null;
+    for (const p of delta.keys()) if (!done.has(p) && (!top || p.z > top.z)) top = p;
+    if (!top) return delta;
+    done.add(top);
+    if (top.z > EPSILON) share(top, delta.get(top), supportersOf(top, placed));
   }
-  for (const p of placements) {
-    p.topLoadKg = carried.get(p);
-    p.overloaded = p.topLoadKg > (p.maxLoadOnTopKg ?? Infinity) + EPSILON;
+}
+
+function wouldOverload(ep, orient, weight, placed) {
+  if (ep.z <= EPSILON) return false;
+  const rect = { x: ep.x, y: ep.y, z: ep.z, L: orient.L, W: orient.W };
+  const delta = loadDeltas(rect, weight, supportersOf(rect, placed), placed);
+  for (const [s, d] of delta) {
+    if (s.topLoadKg + d > (s.maxLoadOnTopKg ?? Infinity) + EPSILON) return true;
+  }
+  return false;
+}
+
+// Record a new placement's weight on every box beneath it.
+function addTopLoad(p, placed) {
+  if (p.z <= EPSILON) return;
+  for (const [s, d] of loadDeltas(p, p.weightKg, supportersOf(p, placed), placed)) {
+    s.topLoadKg += d;
   }
 }
 
