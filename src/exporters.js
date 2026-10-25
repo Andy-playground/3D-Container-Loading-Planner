@@ -226,6 +226,8 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
     if (c.rotatable?.pitch || c.rotatable?.roll) o.push(t('optFlip'));
     if (c.priority === 'urgent') o.push(t('optUrgent'));
     if (c.priority === 'lifo') o.push(t('optLifo'));
+    if (c.floorOnly) o.push(t('optFloorOnly'));
+    if (c.sameCargoOnTop) o.push(t('optSameOnTop'));
     if (c.groupSameSku) o.push(t('optGroup'));
     return o.map((x) => `<span class="opt">${esc(x)}</span>`).join(' ');
   };

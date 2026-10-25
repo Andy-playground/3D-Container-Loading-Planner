@@ -41,6 +41,8 @@ export function pack(cargoTypes, containerSpec, options = {}) {
         supportRatioMin: c.supportRatioMin ?? 0.8,
         priority: c.priority ?? 'normal',
         nonStackable: (c.maxStackLayers ?? 99) <= 1,
+        floorOnly: c.floorOnly ?? false,
+        sameCargoOnTop: c.sameCargoOnTop ?? false,
         groupSameSku: c.groupSameSku ?? false,
       });
     }
@@ -259,6 +261,8 @@ function packOneContainer(boxes, container, containerNum) {
         // DO NOT STACK marking. Fragile goods may still be stacked —
         // their top-load limit only raises a warning (§3c).
         nonStackable: box.maxStackLayers <= 1,
+        floorOnly: box.floorOnly,
+        sameCargoOnTop: box.sameCargoOnTop,
         yaw: orient.yaw,
         pitch: orient.pitch,
         roll: orient.roll,
@@ -340,6 +344,9 @@ function canPlace(ep, orient, box, placed, container) {
 
   // 3. Support / stacking check
   if (z > EPSILON) {
+    // Palletized cargo (e.g. a bicycle-wheel pallet) stands on the floor only.
+    if (box.floorOnly) return false;
+
     const supporters = placed.filter(
       (p) => Math.abs(p.z + p.H - z) < EPSILON &&
              rectanglesIntersect(x, y, L, W, p.x, p.y, p.L, p.W)
@@ -361,6 +368,10 @@ function canPlace(ep, orient, box, placed, container) {
     // 4. Nothing may rest on a DO NOT STACK box (maxStackLayers 1).
     // Top-load limits are only a warning (§3c), never a block.
     if (supporters.some((s) => s.nonStackable)) return false;
+    // Only the same cargo may go on top (e.g. lithium-battery cartons stacked
+    // on each other, no other goods above). Any box above such a stack rests
+    // on one of these, so checking direct supporters covers the whole stack.
+    if (supporters.some((s) => s.sameCargoOnTop && s.cargoId !== box.cargoId)) return false;
 
     // 5. Max stack layers — the new layer may exceed neither this box's
     // limit nor that of any box beneath it in the stack. A DO NOT STACK box

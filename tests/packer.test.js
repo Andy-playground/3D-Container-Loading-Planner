@@ -531,6 +531,36 @@ console.log('T21: DO NOT STACK 可放在其他貨物最上層');
   console.log(`  → DO NOT STACK 放在第 3 層 (z=${x.z})，上方無貨物`);
 }
 
+// ===== T22: Floor-only pallets and same-cargo-only stacking =====
+console.log('T22: 棧板須放地面；上方只能疊同品項');
+{
+  const C = { id: 'T', mode: 'custom', internal: { length: 100, width: 100, height: 300 }, payloadKg: 99999 };
+  const base = { length: 100, width: 100, height: 50, weightKg: 10, quantity: 1, color: '#888',
+    rotatable: { yaw: false, pitch: false, roll: false }, thisSideUp: true };
+  // Wheelset pallet: floor only + DO NOT STACK — cannot be top-loaded onto other cargo
+  const r = pack([
+    { ...base, id: 'S', name: 'Stackable', priority: 'urgent' },
+    { ...base, id: 'W', name: 'Wheelset pallet', maxStackLayers: 1, floorOnly: true },
+  ], C, { allowMultiContainer: false });
+  assert(r.containers[0].placements.length === 1 && r.unplaced[0]?.cargoId === 'W',
+    'T22: floor-only pallet must not be placed on top of other cargo');
+  // Lithium cartons: stack on each other, nothing else on top
+  const r2 = pack([
+    { ...base, id: 'LI', name: 'Li-ion', quantity: 3, sameCargoOnTop: true, priority: 'urgent' },
+    { ...base, id: 'O', name: 'Other' },
+  ], C, { allowMultiContainer: false });
+  const P = r2.containers[0].placements;
+  assert(P.filter((p) => p.cargoId === 'LI').length === 3, 'T22: lithium cartons should stack on each other');
+  assert(!P.some((p) => p.cargoId === 'O'), 'T22: other cargo must not be placed on top of lithium cartons');
+  // Other cargo may still be under, beside, or... the same-cargo box may sit on other cargo
+  const r3 = pack([
+    { ...base, id: 'O', name: 'Other', priority: 'urgent' },
+    { ...base, id: 'LI', name: 'Li-ion', quantity: 2, sameCargoOnTop: true },
+  ], C, { allowMultiContainer: false });
+  assert(r3.containers[0].placements.length === 3, 'T22: same-cargo-on-top boxes may themselves sit on other cargo');
+  console.log('  → 棧板只放地面；鋰電池只與同品項堆疊');
+}
+
 // ===== Summary =====
 console.log('\n========================');
 console.log(`通過: ${passed}, 失敗: ${failed}`);
