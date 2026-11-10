@@ -273,6 +273,10 @@ console.log('T10: 未裝載原因');
   assert(big && big.reasons.oversize === 2, `T10: reason should be oversize, got ${JSON.stringify(big?.reasons)}`);
   assert(heavy && heavy.reasons.overweight === 1, `T10: reason should be overweight, got ${JSON.stringify(heavy?.reasons)}`);
   assert(big.name === 'TooBig', 'T10: unplaced entry should carry cargo name');
+  assert(result.containers.length === 0, `T10: nothing fits → no empty containers, got ${result.containers.length}`);
+  // One placeable box + one oversize box → exactly one container, not maxContainers
+  const mixed = pack([cargo[0], { ...cargo[1], id: 'OK', weightKg: 10 }], c);
+  assert(mixed.containers.length === 1, `T10: unplaceable leftovers must not open empty containers, got ${mixed.containers.length}`);
   console.log(`  → oversize×${big.reasons.oversize}, overweight×${heavy.reasons.overweight}`);
 }
 
@@ -337,6 +341,30 @@ console.log('T12: 同 SKU 聚集 groupSameSku');
   const sWithout = spread(withoutGroup, 'A');
   assert(sWith <= sWithout + 0.001, `T12: grouped spread ${sWith.toFixed(1)} should be ≤ ungrouped ${sWithout.toFixed(1)}`);
   console.log(`  → A 平均距離：聚集 ${sWith.toFixed(0)}cm vs 未聚集 ${sWithout.toFixed(0)}cm`);
+}
+
+// ===== T12b: maxLoadOnTopKg is enforced down the whole support chain =====
+console.log('T12b: 頂壓上限沿支撐鏈檢查');
+{
+  const base = { length: 100, width: 100, height: 50, quantity: 1, color: '#888',
+    rotatable: { yaw: false, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, supportRatioMin: 0.8 };
+  // Footprint-sized container forces a single column: A (bottom) ← B ← C
+  const column = { id: 'COL', mode: 'custom', type: 'COL', label: 'col',
+    internal: { length: 100, width: 100, height: 300 }, payloadKg: 10000 };
+  const cargo = [
+    { ...base, id: 'A', name: 'A', height: 52, weightKg: 10, maxLoadOnTopKg: 50 },
+    { ...base, id: 'B', name: 'B', height: 51, weightKg: 40, maxLoadOnTopKg: 100 },
+    { ...base, id: 'C', name: 'C', height: 50, weightKg: 30, maxLoadOnTopKg: 100 },
+  ];
+  const result = pack(cargo, column, { allowMultiContainer: false });
+  const pl = result.containers[0].placements;
+  const a = pl.find((p) => p.cargoId === 'A');
+  const loadOnA = pl.filter((p) => p.z >= a.z + a.H - 0.01).reduce((s, p) => s + p.weightKg, 0);
+  assert(a && a.z === 0, 'T12b: A should sit on the floor');
+  assert(loadOnA <= 50, `T12b: load on A is ${loadOnA}kg, limit 50kg`);
+  assert(result.unplaced.some((u) => u.cargoId === 'C'), 'T12b: C must be rejected (B+C=70kg > A limit 50kg)');
+  console.log(`  → A 承受 ${loadOnA}kg ≤ 50kg，C 未裝載`);
 }
 
 // ===== T13: Lateral (left/right) balance =====

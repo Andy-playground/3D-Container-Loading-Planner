@@ -70,9 +70,10 @@ export function confirmDialog(message, { okLabel = 'OK', cancelLabel = 'Cancel' 
       backdrop.remove();
       resolve(value);
     };
+    // Enter is handled natively by whichever button has focus (OK by default),
+    // so tabbing to Cancel and pressing Enter cancels rather than confirms.
     const onKey = (e) => {
       if (e.key === 'Escape') close(false);
-      if (e.key === 'Enter') close(true);
     };
     document.addEventListener('keydown', onKey);
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(false); });

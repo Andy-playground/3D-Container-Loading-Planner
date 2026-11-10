@@ -4,6 +4,8 @@
 > 範圍:`src/packer.js`(Extreme-Point + First-Fit-Decreasing)、`src/analytics.js`、`src/scene.js` 座標映射、`tests/packer.test.js`
 > 目的:檢驗「每個貨物功能是否正確反映在 3D 模擬」以及「堆疊演算法是否符合實際裝櫃邏輯」。
 > 本報告僅記錄發現與建議,**不包含程式碼修改**。
+> 
+> **後續更新:** §4.1 的 Bug 1(空櫃)、Bug 2(承重鏈)、Bug 3(死碼)已修正,並補上 §7 第 1、5 項測試(T10 櫃數斷言、T12b 承重鏈)。以下內文保留為當時的評估紀錄,行號對應修正前的程式碼。
 
 ---
 

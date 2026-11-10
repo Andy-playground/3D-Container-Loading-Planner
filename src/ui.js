@@ -50,11 +50,6 @@ export function getState() {
   return { ...state, cargoTypes: state.cargoTypes.map((c) => ({ ...c })) };
 }
 
-/** Cargo ids currently toggled hidden (visual only — packing is unaffected). */
-export function getHiddenCargoIds() {
-  return state.cargoTypes.filter((c) => c.visible === false).map((c) => c.id);
-}
-
 export function init() {
   bindContainerSelect();
   bindCustomContainerForm();
@@ -290,7 +285,7 @@ function fillCargoForm(c) {
   document.getElementById('cargoWeight').value = c.weightKg;
   document.getElementById('cargoQty').value = c.quantity;
   document.getElementById('cargoColor').value = c.color;
-  document.getElementById('cargoMaxLayers').value = c.maxStackLayers === 99 ? 99 : c.maxStackLayers;
+  document.getElementById('cargoMaxLayers').value = c.maxStackLayers;
   document.getElementById('cargoMaxLoadTop').value = c.maxLoadOnTopKg === Infinity ? '' : c.maxLoadOnTopKg;
   document.getElementById('cargoSupportRatio').value = Math.round((c.supportRatioMin ?? 0.8) * 100);
   document.getElementById('cargoYaw').checked = !!c.rotatable?.yaw;
@@ -438,15 +433,15 @@ function parseCargoCSV(text) {
       cargo: {
         name: col(row, 'name') || `Cargo ${line}`,
         length, width, height,
-        weightKg: parseFloat(col(row, 'weight_kg') ?? col(row, 'weight')) || 0,
+        weightKg: Math.max(0, parseFloat(col(row, 'weight_kg') ?? col(row, 'weight')) || 0),
         quantity,
         color: sanitizeColor(col(row, 'color'), palette[(li - 1) % palette.length]),
         rotatable: { yaw: true, pitch: false, roll: false },
         thisSideUp: !(tsu === '0' || tsu === 'false' || tsu === 'no'),
-        maxStackLayers: parseInt(col(row, 'max_stack_layers')) || 99,
+        maxStackLayers: Math.max(1, parseInt(col(row, 'max_stack_layers')) || 99),
         maxLoadOnTopKg: (() => {
           const v = parseFloat(col(row, 'max_load_on_top_kg'));
-          return isFinite(v) ? v : Infinity;
+          return isFinite(v) ? Math.max(0, v) : Infinity;
         })(),
         supportRatioMin: 0.8,
         groupSameSku: false,
@@ -805,6 +800,29 @@ function normalizeCargo(c) {
   };
 }
 
+/**
+ * Cargo ids come from untrusted JSON/localStorage and end up in HTML
+ * attributes and as lookup keys: replace any that are malformed or duplicated,
+ * then move nextCargoId past every id in use so new cargo can't collide.
+ */
+function reindexCargoIds() {
+  const seen = new Set();
+  let next = 1;
+  for (const c of state.cargoTypes) {
+    const m = /^C(\d+)$/.exec(typeof c.id === 'string' ? c.id : '');
+    if (m && !seen.has(c.id)) {
+      seen.add(c.id);
+      next = Math.max(next, parseInt(m[1]) + 1);
+    } else {
+      c.id = null;
+    }
+  }
+  for (const c of state.cargoTypes) {
+    if (c.id === null) c.id = `C${next++}`;
+  }
+  state.nextCargoId = next;
+}
+
 function loadFromStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -814,9 +832,8 @@ function loadFromStorage() {
     if (Array.isArray(data.cargoTypes)) {
       state.cargoTypes = data.cargoTypes.map(normalizeCargo).filter(Boolean);
     }
-    if (data.nextCargoId) state.nextCargoId = data.nextCargoId;
     if (typeof data.planTitle === 'string') state.planTitle = data.planTitle;
-    rebuildContainerSelect();
+    reindexCargoIds();
   } catch (e) {
     console.warn('localStorage load failed', e);
   }
@@ -847,21 +864,19 @@ function exportJSON() {
 export function applyImportedData(data) {
   if (Array.isArray(data.customContainers)) {
     for (const cc of data.customContainers) {
-      if (cc?.internal && !getContainer(cc.id)) {
-        addCustomContainer({
-          id: cc.id,
-          label: cc.label,
-          length: cc.internal.length,
-          width: cc.internal.width,
-          height: cc.internal.height,
-          payloadKg: cc.payloadKg,
-        });
-      }
+      const length = parseFloat(cc?.internal?.length);
+      const width = parseFloat(cc?.internal?.width);
+      const height = parseFloat(cc?.internal?.height);
+      const payloadKg = parseFloat(cc?.payloadKg);
+      if (![length, width, height, payloadKg].every((v) => isFinite(v) && v > 0)) continue;
+      const id = typeof cc.id === 'string' ? cc.id : undefined;
+      if (id && getContainer(id)) continue;
+      addCustomContainer({ id, label: String(cc.label ?? 'Custom'), length, width, height, payloadKg });
     }
   }
-  if (data.containerId) state.containerId = data.containerId;
+  if (typeof data.containerId === 'string') state.containerId = data.containerId;
   if (Array.isArray(data.cargoTypes)) state.cargoTypes = data.cargoTypes.map(normalizeCargo).filter(Boolean);
-  if (data.nextCargoId) state.nextCargoId = data.nextCargoId;
+  reindexCargoIds();
   if (typeof data.metadata?.title === 'string') state.planTitle = data.metadata.title;
   setEditMode(null);
   renderAll();
@@ -876,6 +891,10 @@ export async function importJSONText(text) {
     data = JSON.parse(text);
   } catch (err) {
     toast(t('jsonError') + err.message, 'error');
+    return;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    toast(t('jsonError') + t('jsonNotAPlan'), 'error');
     return;
   }
   if (!(await confirmDialog(t('confirmOverwrite'), { okLabel: t('ok'), cancelLabel: t('cancel') }))) return;

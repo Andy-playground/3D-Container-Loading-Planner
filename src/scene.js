@@ -238,7 +238,7 @@ export function renderResult(result, containerSpec) {
       drawBox(p, offsetX);
     }
     if (containers[i].cog) {
-      drawCOGMarker(containers[i].cog, containerSpec, offsetX);
+      drawCOGMarker(containers[i].cog, offsetX);
     }
     if (containers[i].axleLoads) {
       drawAxleIndicators(containers[i].axleLoads, containerSpec, offsetX);
@@ -248,7 +248,7 @@ export function renderResult(result, containerSpec) {
   frameCamera(containerSpec, containers.length);
 }
 
-function drawCOGMarker(cog, containerSpec, offsetX) {
+function drawCOGMarker(cog, offsetX) {
   const sphereGeom = new THREE.SphereGeometry(15, 16, 12);
   const color = cog.hasWeight ? 0xff8800 : 0xaaaaaa;
   const sphere = new THREE.Mesh(
@@ -296,6 +296,8 @@ export function setCOGVisible(v) {
 
 function clearAll() {
   cancelTweens();
+  for (const tex of faceTexCache.values()) tex.dispose();
+  faceTexCache.clear();
   disposeGroup(groundGroup);
   disposeGroup(containerGroup);
   disposeGroup(boxesGroup);
@@ -587,9 +589,9 @@ function drawBox(p, offsetX) {
     return m;
   };
 
-  const topTex = labelsVisible ? makeBoxFaceTexture(p, p.L, p.W) : null;
-  const endTex = labelsVisible ? makeBoxFaceTexture(p, p.W, p.H) : null;
-  const sideTex = labelsVisible ? makeBoxFaceTexture(p, p.L, p.H) : null;
+  const topTex = labelsVisible ? getBoxFaceTexture(p, p.L, p.W) : null;
+  const endTex = labelsVisible ? getBoxFaceTexture(p, p.W, p.H) : null;
+  const sideTex = labelsVisible ? getBoxFaceTexture(p, p.L, p.H) : null;
 
   const bottomMat = new THREE.MeshStandardMaterial({
     color: baseColor,
@@ -720,16 +722,14 @@ export function setLabelsVisible(v) {
       if (labelsVisible) {
         for (const [idx, a, b] of facePairs) {
           const m = mesh.material[idx];
-          m.map?.dispose();
-          m.map = makeBoxFaceTexture(p, a, b);
+          m.map = getBoxFaceTexture(p, a, b);
           m.color = new THREE.Color('#ffffff');
           m.needsUpdate = true;
         }
       } else {
         for (const [idx] of facePairs) {
           const m = mesh.material[idx];
-          m.map?.dispose();
-          m.map = null;
+          m.map = null; // texture stays in faceTexCache for re-enabling
           m.color = new THREE.Color(baseColor);
           m.needsUpdate = true;
         }
@@ -738,12 +738,25 @@ export function setLabelsVisible(v) {
   }
 }
 
+// Boxes of the same cargo type and orientation show identical faces, so the
+// label textures are shared instead of drawing 3 canvases per box.
+// Emptied (and disposed) in clearAll().
+const faceTexCache = new Map();
+function getBoxFaceTexture(p, faceA, faceB) {
+  const key = JSON.stringify([p.name, p.color, faceA, faceB, !!p.thisSideUp, !!p.nonStackable]);
+  let tex = faceTexCache.get(key);
+  if (!tex) {
+    tex = makeBoxFaceTexture(p, faceA, faceB);
+    faceTexCache.set(key, tex);
+  }
+  return tex;
+}
+
 /**
- * Render a face texture with the cargo name and optional icons.
+ * Render a face texture with the cargo name and constraint icons.
  * Aspect of canvas matches face dimensions (faceA × faceB) so text isn't squished.
  */
-function makeBoxFaceTexture(p, faceA, faceB, opts = {}) {
-  const showIcons = opts.showIcons ?? true;
+function makeBoxFaceTexture(p, faceA, faceB) {
   const canvas = document.createElement('canvas');
   const aspect = faceA / Math.max(faceB, 1);
   if (aspect >= 1) {
@@ -777,7 +790,7 @@ function makeBoxFaceTexture(p, faceA, faceB, opts = {}) {
   ctx.textBaseline = 'middle';
   ctx.fillText(p.name, canvas.width / 2, canvas.height / 2);
 
-  if (showIcons) {
+  {
     const icons = [];
     if (p.thisSideUp) icons.push({ char: '↑', color: fg, size: minDim * 0.28 });
     if (p.nonStackable) icons.push({ char: '⊘', color: '#ff3333', size: minDim * 0.30 });

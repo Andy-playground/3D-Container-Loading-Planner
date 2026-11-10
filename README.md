@@ -40,16 +40,14 @@
 
 ## 快速開始
 
-### 直接開啟
-雙擊 `index.html` 即可在瀏覽器執行（Three.js 已 vendor 至 `vendor/`，無需網路）。
-
-### 本機伺服器（推薦）
+### 本機伺服器
+本專案使用 ES modules，瀏覽器不允許從 `file://` 載入，因此**無法直接雙擊 `index.html`**，需透過本機 HTTP 伺服器開啟（Three.js 已 vendor 至 `vendor/`，無需網路）。
 ```bash
 # Python（含 no-cache header，方便開發）
 python3 serve.py 8765
 
 # 或標準 http.server
-python3 -m http.server 8000
+python3 -m http.server 8765
 ```
 然後開啟 http://localhost:8765
 
@@ -69,7 +67,7 @@ name, length_cm, width_cm, height_cm, weight_kg, quantity, color, max_stack_laye
 
 ```
 .
-├── index.html              # 入口（含 three.js import map）
+├── index.html              # 入口
 ├── SDD.md                  # 系統設計文件
 ├── docs/
 │   └── ALGORITHM_REVIEW.md # 堆疊演算法評估報告（正確性/效能/測試缺口）

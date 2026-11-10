@@ -53,7 +53,7 @@
 ### 2.2 技術選型
 | 層級 | 技術 | 說明 |
 |---|---|---|
-| 渲染引擎 | Three.js (r160) | vendored 至 `vendor/`（import map），無需 build、離線可用 |
+| 渲染引擎 | Three.js (r160) | vendored 至 `vendor/`（直接相對路徑 import，不使用 import map），無需 build、離線可用 |
 | 模組化 | ES Modules | 原生 `import`/`export` |
 | 演算法 | Extreme-Point 3D bin-packing | 純 JavaScript |
 | 持久化 | localStorage | 瀏覽器端 |
@@ -556,7 +556,7 @@ Total Items: 243
 - [x] M5-8: 左右橫向平衡檢查（COG 對寬度中線偏移 > 8% 警示）
 - [x] M5-9: 3D 截圖 PNG 匯出；PDF 報告內嵌 3D 快照 + 貨物彙總表
 - [x] M5-10: 計畫名稱、常用尺寸 preset（EUR/US 棧板、紙箱、油桶）
-- [x] M5-11: Three.js vendor 化（`vendor/` + import map），完全離線可用（NFR-4）
+- [x] M5-11: Three.js vendor 化（`vendor/`，直接相對路徑 import），完全離線可用（NFR-4）
 
 ### Future（無排程）
 - 危險品分隔規則（IMO/IMDG）

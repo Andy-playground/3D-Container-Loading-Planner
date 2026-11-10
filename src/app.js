@@ -52,6 +52,7 @@ function start() {
     console.log(`Pack took ${(t1 - t0).toFixed(1)}ms`);
 
     meta.title = state.planTitle;
+    meta.cargoTypes = state.cargoTypes; // snapshot the plan was packed from
     lastResult = result;
     lastContainerSpec = container;
     lastMeta = meta;
@@ -187,7 +188,7 @@ function start() {
 
   // ===== Exports =====
   function ensureResult() {
-    if (!lastResult) runPack();
+    if (!lastResult && !runPack()) toast(t('addAtLeastOne'), 'error');
     return lastResult;
   }
 
@@ -202,7 +203,6 @@ function start() {
       exportPDF(lastResult, lastContainerSpec, {
         ...lastMeta,
         snapshotDataUrl: captureImage(),
-        cargoTypes: ui.getState().cargoTypes,
       });
     }
   });

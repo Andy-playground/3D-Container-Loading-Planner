@@ -53,7 +53,6 @@ export function pack(cargoTypes, containerSpec, options = {}) {
     return vb - va;
   });
 
-
   // 3. Loop containers
   const containers = [];
   let remaining = [...allBoxes];
@@ -62,13 +61,16 @@ export function pack(cargoTypes, containerSpec, options = {}) {
   while (remaining.length > 0 && containerCount < opts.maxContainers) {
     containerCount++;
     const result = packOneContainer(remaining, containerSpec, containerCount);
+    remaining = result.unplaced;
+    // Nothing fits (everything left is oversize/overweight): opening further
+    // containers would only produce empty ones.
+    if (result.placements.length === 0) break;
     containers.push({
       containerId: `${containerSpec.id}-${containerCount}`,
       containerSpec,
       placements: result.placements,
       stats: computeStats(result.placements, containerSpec),
     });
-    remaining = result.unplaced;
     if (!opts.allowMultiContainer) break;
   }
 
@@ -299,13 +301,11 @@ function canPlace(ep, orient, box, placed, container) {
     }
     if (supportedArea / baseArea < box.supportRatioMin - EPSILON) return false;
 
-    // 4. Top-load weight check on each supporter chain
+    // 4. Top-load weight check down the whole support chain: the new box
+    // presses on its direct supporters and on everything beneath them.
+    const checked = new Set();
     for (const s of supporters) {
-      const topLoad = computeTopLoad(s, placed) + box.weightKg;
-      const supporterCargo = placed.find((p) => p.instanceId === s.instanceId);
-      // We need the original maxLoadOnTopKg — store on placement
-      const limit = s.maxLoadOnTopKg ?? Infinity;
-      if (topLoad > limit + EPSILON) return false;
+      if (!chainCanBear(s, box.weightKg, placed, checked)) return false;
     }
 
     // 5. Max stack layers
@@ -334,6 +334,21 @@ function rectanglesIntersect(x1, y1, L1, W1, x2, y2, L2, W2) {
     y1 + W1 > y2 + EPSILON &&
     y2 + W2 > y1 + EPSILON
   );
+}
+
+// True if `supporter` and every box beneath it can take `extraKg` more on top.
+function chainCanBear(supporter, extraKg, placed, checked) {
+  if (checked.has(supporter)) return true;
+  checked.add(supporter);
+  const limit = supporter.maxLoadOnTopKg ?? Infinity;
+  if (limit !== Infinity && computeTopLoad(supporter, placed) + extraKg > limit + EPSILON) return false;
+  if (supporter.z < EPSILON) return true;
+  for (const p of placed) {
+    if (Math.abs(p.z + p.H - supporter.z) < EPSILON &&
+        rectanglesIntersect(supporter.x, supporter.y, supporter.L, supporter.W, p.x, p.y, p.L, p.W) &&
+        !chainCanBear(p, extraKg, placed, checked)) return false;
+  }
+  return true;
 }
 
 function computeTopLoad(supporter, placed) {

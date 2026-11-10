@@ -96,13 +96,23 @@ function hasStorage() {
   return typeof localStorage !== 'undefined';
 }
 
+const isPositive = (v) => typeof v === 'number' && isFinite(v) && v > 0;
+
+// Stored/imported data is untrusted: dimensions are rendered and fed to the
+// packer, so anything non-numeric is dropped.
+function isValidCustomContainer(c) {
+  return !!c && typeof c.id === 'string' && c.id !== '' && !!c.internal &&
+    isPositive(c.internal.length) && isPositive(c.internal.width) &&
+    isPositive(c.internal.height) && isPositive(c.payloadKg);
+}
+
 export function getCustomContainers() {
   if (!hasStorage()) return [];
   try {
     const raw = localStorage.getItem(CUSTOM_KEY);
     if (!raw) return [];
     const list = JSON.parse(raw);
-    return Array.isArray(list) ? list.filter((c) => c && c.id && c.internal) : [];
+    return Array.isArray(list) ? list.filter(isValidCustomContainer) : [];
   } catch {
     return [];
   }
@@ -138,8 +148,4 @@ export function getAllContainers() {
 
 export function getContainer(id) {
   return getAllContainers().find((c) => c.id === id);
-}
-
-export function getContainersByMode(mode) {
-  return getAllContainers().filter((c) => c.mode === mode);
 }

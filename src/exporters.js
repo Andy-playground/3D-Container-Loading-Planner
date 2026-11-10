@@ -144,7 +144,7 @@ export function exportPDF(result, containerSpec, meta = {}) {
   }
   const win = window.open('', '_blank');
   if (!win) {
-    toast('Popup blocked — please allow popups to export PDF.', 'error');
+    toast(t('popupBlocked'), 'error');
     return;
   }
 
@@ -320,12 +320,8 @@ function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
       </table>
     </section>`;
 
-  const reasonLine = (u) => {
-    const parts = Object.entries(u.reasons ?? {}).map(([r, n]) => `${t(REASON_KEYS[r] ?? r)}×${n}`);
-    return parts.length ? ` (${parts.join(', ')})` : '';
-  };
   const unplacedHtml = result.unplaced?.length
-    ? `<section><h2>${t('unplacedLabel')}</h2><ul>${result.unplaced.map(u => `<li>${esc(u.name ?? u.cargoId)}: ${u.count}${esc(reasonLine(u))}</li>`).join('')}</ul></section>`
+    ? `<section><h2>${t('unplacedLabel')}</h2><ul>${result.unplaced.map(u => `<li>${esc(u.name ?? u.cargoId)}: ${u.count}${esc(fmtReasons(u))}</li>`).join('')}</ul></section>`
     : '';
 
   // --- 3D snapshot at the very bottom
