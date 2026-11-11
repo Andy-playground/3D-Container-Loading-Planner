@@ -339,7 +339,7 @@ console.log('T12: 同 SKU 聚集 groupSameSku');
   assert(checkInBounds(withGroup, c) === null, 'T12: out of bounds with groupSameSku');
   const sWith = spread(withGroup, 'A');
   const sWithout = spread(withoutGroup, 'A');
-  assert(sWith <= sWithout + 0.001, `T12: grouped spread ${sWith.toFixed(1)} should be ≤ ungrouped ${sWithout.toFixed(1)}`);
+  assert(sWith < sWithout, `T12: grouped spread ${sWith.toFixed(1)} should be < ungrouped ${sWithout.toFixed(1)}`);
   console.log(`  → A 平均距離：聚集 ${sWith.toFixed(0)}cm vs 未聚集 ${sWithout.toFixed(0)}cm`);
 }
 
@@ -365,6 +365,56 @@ console.log('T12b: 頂壓上限沿支撐鏈檢查');
   assert(loadOnA <= 50, `T12b: load on A is ${loadOnA}kg, limit 50kg`);
   assert(result.unplaced.some((u) => u.cargoId === 'C'), 'T12b: C must be rejected (B+C=70kg > A limit 50kg)');
   console.log(`  → A 承受 ${loadOnA}kg ≤ 50kg，C 未裝載`);
+}
+
+// ===== T12c: LIFO boxes keep a clear path to the door =====
+console.log('T12c: LIFO 貨物不被擋住');
+{
+  const base = { weightKg: 10, color: '#888',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: 1000, supportRatioMin: 0.8 };
+  const cargo = [
+    // Small LIFO boxes would otherwise be tucked on top of stacks deep inside
+    { ...base, id: 'L', name: 'Lifo', length: 50, width: 50, height: 50, quantity: 12, priority: 'lifo' },
+    { ...base, id: 'N', name: 'Normal', length: 100, width: 110, height: 120, quantity: 16, priority: 'normal' },
+    { ...base, id: 'U', name: 'Urgent', length: 80, width: 80, height: 80, quantity: 6, priority: 'urgent' },
+  ];
+  const c = getContainer('OCEAN_20GP');
+  const result = pack(cargo, c);
+  const pl = result.containers.flatMap((ct) => ct.placements.map((p) => ({ ...p, ct })));
+  const lifo = pl.filter((p) => p.cargoId === 'L');
+  const overlap = (a0, a1, b0, b1) => a1 > b0 + 0.01 && b1 > a0 + 0.01;
+  let blocked = 0;
+  for (const l of lifo) {
+    for (const o of pl) {
+      if (o.ct !== l.ct || o.cargoId === 'L') continue;
+      const inFront = o.x + o.L > l.x + l.L + 0.01 &&
+        overlap(l.y, l.y + l.W, o.y, o.y + o.W) && overlap(l.z, l.z + l.H, o.z, o.z + o.H);
+      const onTop = o.z >= l.z + l.H - 0.01 &&
+        overlap(l.x, l.x + l.L, o.x, o.x + o.L) && overlap(l.y, l.y + l.W, o.y, o.y + o.W);
+      if (inFront || onTop) blocked++;
+    }
+  }
+  assert(lifo.length === 12, `T12c: all LIFO boxes should be placed, got ${lifo.length}`);
+  assert(blocked === 0, `T12c: ${blocked} LIFO box(es) blocked by later-unloaded cargo`);
+  assert(checkNoOverlap(result.containers[0].placements) === null, 'T12c: overlap');
+  console.log(`  → ${lifo.length} 個 LIFO 箱，被擋住 ${blocked} 個`);
+}
+
+// ===== T12d: unplaced reason when the container payload is used up =====
+console.log('T12d: 載重已滿的未裝載原因');
+{
+  const cargo = [{ id: 'H', name: 'Heavy', length: 50, width: 50, height: 50,
+    weightKg: 400, quantity: 5, color: '#888',
+    rotatable: { yaw: true, pitch: false, roll: false }, thisSideUp: true,
+    maxStackLayers: 99, maxLoadOnTopKg: 5000, supportRatioMin: 0.8 }];
+  const small = { id: 'S', mode: 'custom', type: 'S', label: 's',
+    internal: { length: 500, width: 200, height: 200 }, payloadKg: 1000 };
+  const result = pack(cargo, small, { allowMultiContainer: false });
+  const u = result.unplaced.find((x) => x.cargoId === 'H');
+  assert(result.containers[0].placements.length === 2, 'T12d: 2 × 400kg fit under 1000kg');
+  assert(u && u.reasons.payload === 3, `T12d: reason should be payload×3, got ${JSON.stringify(u?.reasons)}`);
+  console.log(`  → 已裝 2 箱，未裝載原因 payload×${u?.reasons.payload}`);
 }
 
 // ===== T13: Lateral (left/right) balance =====

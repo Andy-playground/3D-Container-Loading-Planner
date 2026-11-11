@@ -106,8 +106,10 @@ export function initScene(canvasContainerEl) {
   });
   animate();
 
-  // Debug hook
-  window.__clp = { scene, camera, controls, renderer, THREE };
+  // Debug hook — only with ?debug in the URL
+  if (new URLSearchParams(window.location.search).has('debug')) {
+    window.__clp = { scene, camera, controls, renderer, THREE };
+  }
 }
 
 const raycaster = new THREE.Raycaster();
@@ -227,7 +229,7 @@ export function renderResult(result, containerSpec) {
 
   if (containers.length === 0) {
     drawContainerFrame(containerSpec, 0);
-    frameCamera(containerSpec, 1);
+    frameCameraIfLayoutChanged(containerSpec, 1);
     return;
   }
 
@@ -245,7 +247,18 @@ export function renderResult(result, containerSpec) {
     }
   }
 
-  frameCamera(containerSpec, containers.length);
+  frameCameraIfLayoutChanged(containerSpec, containers.length);
+}
+
+// Re-packing the same container layout keeps the user's current view;
+// the camera is only re-framed when the layout itself changes.
+let framedLayout = '';
+function frameCameraIfLayoutChanged(spec, containerCount) {
+  const { length, width, height } = spec.internal;
+  const layout = `${length}|${width}|${height}|${containerCount}`;
+  if (layout === framedLayout) return;
+  framedLayout = layout;
+  frameCamera(spec, containerCount);
 }
 
 function drawCOGMarker(cog, offsetX) {

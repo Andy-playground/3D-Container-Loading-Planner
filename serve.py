@@ -12,8 +12,8 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
-    server = ThreadingHTTPServer(('0.0.0.0', port), NoCacheHandler)
-    print(f'Serving (no-cache) on port {port}')
+    server = ThreadingHTTPServer(('127.0.0.1', port), NoCacheHandler)
+    print(f'Serving (no-cache) on http://127.0.0.1:{port}')
     try:
         server.serve_forever()
     except KeyboardInterrupt:

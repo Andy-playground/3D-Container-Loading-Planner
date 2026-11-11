@@ -1,4 +1,5 @@
 // Preset container definitions per SDD §6.2
+// Ocean container dimensions follow docs/container-specs.pdf.
 // All dimensions in cm, weight in kg
 
 export const CONTAINERS = [

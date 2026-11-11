@@ -4,12 +4,7 @@
 
 import { t, getLang } from './i18n.js';
 import { toast } from './toast.js';
-
-function tsForFilename() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-}
+import { escapeHtml, REASON_KEYS, tsForFilename } from './util.js';
 
 function tsHuman() {
   const d = new Date();
@@ -39,8 +34,6 @@ function fmtRot(p) {
   return parts.length ? parts.join(',') : '0';
 }
 
-const REASON_KEYS = { oversize: 'reasonOversize', overweight: 'reasonOverweight', nospace: 'reasonNospace' };
-
 function fmtReasons(u) {
   const parts = Object.entries(u.reasons ?? {}).map(([r, n]) => `${t(REASON_KEYS[r] ?? r)}×${n}`);
   return parts.length ? ` (${parts.join(', ')})` : '';
@@ -49,7 +42,7 @@ function fmtReasons(u) {
 // ===== TXT =====
 export function exportTXT(result, containerSpec, meta = {}) {
   if (!result?.containers?.length) {
-    toast(t('addAtLeastOne'), 'error');
+    toast(t('nothingFits'), 'error');
     return;
   }
   const lines = [];
@@ -83,9 +76,9 @@ export function exportTXT(result, containerSpec, meta = {}) {
     const ordered = [...ct.placements].sort((a, b) => (a.loadSeq ?? 0) - (b.loadSeq ?? 0));
     for (const p of ordered) {
       lines.push(`${p.loadSeq ?? '?'}. ${p.name}`);
-      lines.push(`   Position: X=${p.x.toFixed(0)}cm, Y=${p.y.toFixed(0)}cm, Z=${p.z.toFixed(0)}cm`);
-      lines.push(`   Dimensions: ${p.L}×${p.W}×${p.H}cm`);
-      lines.push(`   Weight: ${(p.weightKg ?? 0)}kg  Orientation: ${fmtRot(p)}`);
+      lines.push(`   ${t('pos')}: X=${p.x.toFixed(0)}cm, Y=${p.y.toFixed(0)}cm, Z=${p.z.toFixed(0)}cm`);
+      lines.push(`   ${t('actualDims')}: ${p.L}×${p.W}×${p.H}cm`);
+      lines.push(`   ${t('weight')}: ${(p.weightKg ?? 0)}kg  ${t('orientation')}: ${fmtRot(p)}`);
     }
     lines.push('');
   }
@@ -105,9 +98,9 @@ function csvCell(v) {
   return s;
 }
 
-export function exportCSV(result, containerSpec, meta = {}) {
+export function exportCSV(result, containerSpec) {
   if (!result?.containers?.length) {
-    toast(t('addAtLeastOne'), 'error');
+    toast(t('nothingFits'), 'error');
     return;
   }
   const rows = [];
@@ -139,7 +132,7 @@ export function exportCSV(result, containerSpec, meta = {}) {
 // ===== PDF (via print) =====
 export function exportPDF(result, containerSpec, meta = {}) {
   if (!result?.containers?.length) {
-    toast(t('addAtLeastOne'), 'error');
+    toast(t('nothingFits'), 'error');
     return;
   }
   const win = window.open('', '_blank');
@@ -165,9 +158,7 @@ export function exportPDF(result, containerSpec, meta = {}) {
 // Report layout: header-level overview → one line per cargo type
 // (boxes / weight / CBM / applied loading options) → 3D snapshot last.
 function renderPrintHTML(result, containerSpec, totalItems, meta = {}) {
-  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
+  const esc = escapeHtml;
 
   // --- Aggregates across all containers
   const placedBy = new Map();   // cargoId -> count

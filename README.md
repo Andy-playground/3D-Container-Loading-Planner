@@ -14,6 +14,8 @@
 - ✅ 約束：重量、堆疊層數、支撐比例、頂壓承重、面朝上
 - ✅ 旋轉軸向（yaw / pitch / roll）+ This-Side-Up
 - ✅ 裝載優先權（normal / urgent / lifo）+ **同 SKU 空間聚集**（v3.0）
+- ✅ **LIFO 保證通道淨空**：後裝先卸的貨物與櫃門之間不會被其他貨物擋住（v3.2）
+- ✅ 修改貨物或貨櫃後**自動重新裝載**，畫面、統計與匯出永遠一致（v3.2）
 
 ### 貨物管理
 - ✅ **貨物編輯／複製／顯示隱藏**（v3.0）
@@ -43,25 +45,25 @@
 ### 本機伺服器
 本專案使用 ES modules，瀏覽器不允許從 `file://` 載入，因此**無法直接雙擊 `index.html`**，需透過本機 HTTP 伺服器開啟（Three.js 已 vendor 至 `vendor/`，無需網路）。
 ```bash
-# Python（含 no-cache header，方便開發）
 python3 serve.py 8765
-
-# 或標準 http.server
-python3 -m http.server 8765
 ```
 然後開啟 http://localhost:8765
+
+`serve.py` 只監聽本機（127.0.0.1），並送出 no-cache header。請不要改用 `python3 -m http.server`：它允許瀏覽器快取，更新程式後可能載到舊的模組。
 
 ### 執行演算法測試
 ```bash
 node tests/packer.test.js
 ```
-測試涵蓋 packer 8 案例 + COG / 軸載 / 橫向平衡 / loadSeq / 未裝載原因 / packAuto / groupSameSku（共 65+ 斷言）。
+測試涵蓋 packer 裝載、承重鏈、LIFO 通道、未裝載原因、packAuto、groupSameSku，以及 COG / 軸載 / 橫向平衡 / loadSeq / i18n 鍵一致性（共 77 斷言）。
 
 ### CSV 匯入格式
 側欄「下載 CSV 範本」可取得範本，欄位：
 ```
-name, length_cm, width_cm, height_cm, weight_kg, quantity, color, max_stack_layers, max_load_on_top_kg, this_side_up, priority
+name, length_cm, width_cm, height_cm, weight_kg, quantity, color, max_stack_layers, max_load_on_top_kg, this_side_up, priority,
+allow_yaw, allow_pitch, allow_roll, support_ratio_pct, group_same_sku
 ```
+只有長寬高為必填；布林欄位用 `1`/`0`。欄位內容可用雙引號包住，內含逗號或換行皆可。
 
 ## 檔案結構
 
@@ -70,7 +72,8 @@ name, length_cm, width_cm, height_cm, weight_kg, quantity, color, max_stack_laye
 ├── index.html              # 入口
 ├── SDD.md                  # 系統設計文件
 ├── docs/
-│   └── ALGORITHM_REVIEW.md # 堆疊演算法評估報告（正確性/效能/測試缺口）
+│   ├── ALGORITHM_REVIEW.md # 堆疊演算法評估報告（正確性/效能/測試缺口）
+│   └── container-specs.pdf # 海運貨櫃規格表（內建櫃型尺寸的來源）
 ├── package.json
 ├── serve.py                # 開發伺服器（no-cache）
 ├── vendor/
@@ -85,13 +88,13 @@ name, length_cm, width_cm, height_cm, weight_kg, quantity, color, max_stack_laye
 │   ├── analytics.js        # 重心 + 軸載 + 橫向平衡
 │   ├── exporters.js        # TXT / CSV / PDF（內嵌 3D 快照）
 │   ├── i18n.js             # 中／英 翻譯
+│   ├── toast.js            # toast 通知、確認對話框
+│   ├── util.js             # 共用小工具（escapeHtml、檔名時間戳）
 │   └── demo.js             # 示範資料
 ├── styles/
 │   └── main.css
-├── tests/
-│   └── packer.test.js      # selftest（packer + analytics）
-└── legacy/
-    └── loading.html        # v0 單檔版本（保留參考）
+└── tests/
+    └── packer.test.js      # selftest（packer + analytics）
 ```
 
 ## 開發路線
@@ -103,6 +106,8 @@ name, length_cm, width_cm, height_cm, weight_kg, quantity, color, max_stack_laye
 | 3 | v1.2 | 棧板化、填充規則、優先權、相同貨物聚集 | ✅ |
 | 4 | v2.0 | TXT/CSV/PDF 匯出、重心、軸載、i18n | ✅ |
 | 5 | v3.0 | 編輯/複製、自訂貨櫃、AUTO 選櫃、裝載順序播放、CSV 匯入、未裝載原因、橫向平衡、PNG/PDF 快照、離線化 | ✅ |
+| 6 | v3.1 | 演算法評估報告、擬真 3D 貨櫃、白話貨物表單、PDF 報告重構、Apple 風格 UI | ✅ |
+| 7 | v3.2 | 承重鏈檢查、LIFO 通道淨空、空櫃修正、自動重新裝載、匯入驗證強化、CSV 欄位擴充、效能優化 | ✅ |
 
 詳見 [SDD §11](./SDD.md#11-開發路線圖)。
 
