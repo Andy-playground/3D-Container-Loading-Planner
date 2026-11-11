@@ -53,7 +53,7 @@
 ### 2.2 技術選型
 | 層級 | 技術 | 說明 |
 |---|---|---|
-| 渲染引擎 | Three.js (r160) | vendored 至 `vendor/`（import map），無需 build、離線可用 |
+| 渲染引擎 | Three.js (r160) | vendored 至 `vendor/`（直接相對路徑 import，不使用 import map），無需 build、離線可用 |
 | 模組化 | ES Modules | 原生 `import`/`export` |
 | 演算法 | Extreme-Point 3D bin-packing | 純 JavaScript |
 | 持久化 | localStorage | 瀏覽器端 |
@@ -90,7 +90,7 @@
 
 **1.4 詳細規格**：
 - `urgent`：優先排入第一個貨櫃
-- `lifo`（後進先出 → 先卸貨者後裝）：靠門邊或上層
+- `lifo`（後進先出 → 先卸貨者後裝）：最後裝載，且與櫃門之間、上方皆不得有非 lifo 貨物（保證可先卸）
 - `normal`：依 FFD 排序
 
 ### 4.2 旋轉與方向控制（FR-2）
@@ -192,13 +192,13 @@ interface CargoItem {
     roll: boolean            // L↔H（翻倒）
   }
   thisSideUp: boolean        // 強制 pitch=roll=false
-  rotationStep: number       // degrees (90 | 45 | 15)
+  rotationStep: number       // degrees (90 | 45 | 15) — ⚠ 未實作：目前僅支援 90° 換邊
   // 堆疊
   maxStackLayers: number     // 含自身（1=不可堆疊）
   maxLoadOnTopKg: number     // 頂面可承重 kg
   supportRatioMin: number    // 0~1
   groupSameSku: boolean      // 同 SKU 聚集
-  // 棧板
+  // 棧板 — ⚠ 未實作：棧板目前以一般貨物輸入（見常用尺寸 preset）
   isPallet: boolean
   palletItems?: SubItem[]    // 棧板上的子貨物（統計用）
   // 優先權
@@ -225,7 +225,7 @@ interface Container {
     height: number           // cm
   }
   payloadKg: number          // 最大載重
-  doorWidth?: number         // 門寬（用於 LIFO 規劃）
+  doorWidth?: number         // ⚠ 未實作：門尺寸未建模；LIFO 以「貨物到櫃門 (+X) 的通道淨空」實作
   doorHeight?: number
 }
 ```
@@ -526,18 +526,18 @@ Total Items: 243
 - [ ] M1-6: README + 部署到 GitHub Pages
 
 ### Phase 2: 旋轉與標示（v1.1）
-- [ ] M2-1: 旋轉軸向控制 yaw/pitch/roll（2.1）
-- [ ] M2-2: This-Side-Up 旗標（2.2）
-- [ ] M2-3: 3D 文字標籤（5.2）
-- [ ] M2-4: 透明度調節（5.3）
-- [ ] M2-5: 頂壓重量檢查（3.2）
+- [x] M2-1: 旋轉軸向控制 yaw/pitch/roll（2.1）
+- [x] M2-2: This-Side-Up 旗標（2.2）
+- [x] M2-3: 3D 文字標籤（5.2）
+- [x] M2-4: 透明度調節（5.3）
+- [x] M2-5: 頂壓重量檢查（3.2；v3.2 起沿整條支撐鏈檢查）
 
 ### Phase 3: 進階規則（v1.2）
-- [ ] M3-1: 棧板化（4.1）
-- [ ] M3-2: 填充規則 columnFill / mixed（4.2）
-- [ ] M3-3: 裝載優先權 LIFO / urgent（1.4）
-- [ ] M3-4: 旋轉步長自訂（2.3）
-- [ ] M3-5: 相同貨物聚集（3.4）
+- [ ] M3-1: 棧板化（4.1）— 未實作
+- [ ] M3-2: 填充規則 columnFill / mixed（4.2）— 未實作
+- [x] M3-3: 裝載優先權 LIFO / urgent（1.4；v3.2 起 LIFO 保證到櫃門的通道淨空）
+- [ ] M3-4: 旋轉步長自訂（2.3）— 未實作
+- [x] M3-5: 相同貨物聚集（3.4）
 
 ### Phase 4: 報表與整合（v2.0）
 - [x] M4-1: TXT/CSV/PDF 匯出（PDF 走 `window.print()` 路徑，避免 CJK 字型內嵌問題）
@@ -551,12 +551,19 @@ Total Items: 243
 - [x] M5-3: 自動選櫃 `packAuto`（評比準則：未裝載數 → 櫃數 → 平均體積利用率）
 - [x] M5-4: 裝載順序 `loadSeq`（櫃內由內而外、由下而上）+ 3D 步驟播放器
 - [x] M5-5: CSV 貨物清單匯入 + 範本下載
-- [x] M5-6: 未裝載原因（oversize / overweight / nospace）
-- [x] M5-7: 同 SKU 空間聚集（FR 3.4；EP 依距同類箱距離優先排序）
+- [x] M5-6: 未裝載原因（oversize / overweight / payload / nospace）
+- [x] M5-7: 同 SKU 空間聚集（FR 3.4；EP 依「放置後箱心到同類重心」距離優先排序）
 - [x] M5-8: 左右橫向平衡檢查（COG 對寬度中線偏移 > 8% 警示）
 - [x] M5-9: 3D 截圖 PNG 匯出；PDF 報告內嵌 3D 快照 + 貨物彙總表
 - [x] M5-10: 計畫名稱、常用尺寸 preset（EUR/US 棧板、紙箱、油桶）
-- [x] M5-11: Three.js vendor 化（`vendor/` + import map），完全離線可用（NFR-4）
+- [x] M5-11: Three.js vendor 化（`vendor/`，直接相對路徑 import），完全離線可用（NFR-4）
+
+### Phase 6: 正確性與一致性（v3.2）
+- [x] M6-1: 多櫃迴圈不再產生空櫃；頂壓上限沿支撐鏈檢查
+- [x] M6-2: 堆疊層數／頂壓改為放置時增量記錄（深堆疊情境快 3–4 倍）
+- [x] M6-3: 修改貨物或貨櫃後自動重新裝載
+- [x] M6-4: JSON／localStorage 匯入驗證（貨物 ID、自訂貨櫃尺寸）
+- [x] M6-5: CSV 支援引號內換行與旋轉／支撐比例／聚集欄位
 
 ### Future（無排程）
 - 危險品分隔規則（IMO/IMDG）

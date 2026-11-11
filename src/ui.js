@@ -5,8 +5,10 @@ import {
 } from './containers.js';
 import { t } from './i18n.js';
 import { toast, confirmDialog, openModal } from './toast.js';
+import { escapeHtml, REASON_KEYS, tsForFilename } from './util.js';
 
 const STORAGE_KEY = 'clp:current';
+const PLAN_FORMAT_VERSION = '3.2'; // written to exported JSON metadata
 
 export const AUTO_CONTAINER_ID = '__AUTO__';
 
@@ -31,9 +33,9 @@ const PRESETS = [
 ];
 
 const listeners = {
-  changed: [],
+  changed: [],   // cargo list or container changed
   pack: [],
-  containerChanged: [],
+  opacity: [],
   labelsToggle: [],
   cogToggle: [],
   visibilityToggle: [],
@@ -50,11 +52,6 @@ export function getState() {
   return { ...state, cargoTypes: state.cargoTypes.map((c) => ({ ...c })) };
 }
 
-/** Cargo ids currently toggled hidden (visual only — packing is unaffected). */
-export function getHiddenCargoIds() {
-  return state.cargoTypes.filter((c) => c.visible === false).map((c) => c.id);
-}
-
 export function init() {
   bindContainerSelect();
   bindCustomContainerForm();
@@ -65,6 +62,12 @@ export function init() {
   bindActions();
   loadFromStorage();
   renderAll();
+  document.getElementById('cargoName').value = nextDefaultName();
+}
+
+// "Cargo A", "Cargo B", … for the next cargo type to be added
+function nextDefaultName() {
+  return `${t('defaultCargoName')} ${String.fromCharCode(65 + Math.min(state.cargoTypes.length, 25))}`;
 }
 
 // ===== Drag & drop import (whole window, .csv / .json) =====
@@ -161,7 +164,6 @@ function bindContainerSelect() {
     renderContainerInfo();
     saveToStorage();
     emit('changed');
-    emit('containerChanged');
   });
 }
 
@@ -188,7 +190,6 @@ function bindCustomContainerForm() {
     form.style.display = 'none';
     saveToStorage();
     emit('changed');
-    emit('containerChanged');
   });
   document.getElementById('ccDeleteBtn')?.addEventListener('click', async () => {
     const c = getContainer(state.containerId);
@@ -200,7 +201,6 @@ function bindCustomContainerForm() {
     renderContainerInfo();
     saveToStorage();
     emit('changed');
-    emit('containerChanged');
   });
 }
 
@@ -249,7 +249,7 @@ function sanitizeColor(c, fallback = '#3498db') {
 }
 
 function readCargoForm() {
-  const name = document.getElementById('cargoName').value.trim() || `${t('name')} ${state.cargoTypes.length + 1}`;
+  const name = document.getElementById('cargoName').value.trim() || nextDefaultName();
   const length = parseFloat(document.getElementById('cargoL').value);
   const width = parseFloat(document.getElementById('cargoW').value);
   const height = parseFloat(document.getElementById('cargoH').value);
@@ -290,7 +290,7 @@ function fillCargoForm(c) {
   document.getElementById('cargoWeight').value = c.weightKg;
   document.getElementById('cargoQty').value = c.quantity;
   document.getElementById('cargoColor').value = c.color;
-  document.getElementById('cargoMaxLayers').value = c.maxStackLayers === 99 ? 99 : c.maxStackLayers;
+  document.getElementById('cargoMaxLayers').value = c.maxStackLayers;
   document.getElementById('cargoMaxLoadTop').value = c.maxLoadOnTopKg === Infinity ? '' : c.maxLoadOnTopKg;
   document.getElementById('cargoSupportRatio').value = Math.round((c.supportRatioMin ?? 0.8) * 100);
   document.getElementById('cargoYaw').checked = !!c.rotatable?.yaw;
@@ -330,7 +330,7 @@ function bindCargoForm() {
       setEditMode(null);
     } else {
       state.cargoTypes.push({ id: `C${state.nextCargoId++}`, visible: true, ...data });
-      document.getElementById('cargoName').value = `${t('name')} ${String.fromCharCode(64 + Math.min(state.cargoTypes.length + 1, 26))}`;
+      document.getElementById('cargoName').value = nextDefaultName();
     }
 
     renderCargoList();
@@ -359,14 +359,18 @@ function bindCsvImport() {
   document.getElementById('csvTemplateBtn')?.addEventListener('click', downloadCsvTemplate);
 }
 
-const CSV_COLUMNS = ['name', 'length_cm', 'width_cm', 'height_cm', 'weight_kg', 'quantity', 'color', 'max_stack_layers', 'max_load_on_top_kg', 'this_side_up', 'priority'];
+const CSV_COLUMNS = [
+  'name', 'length_cm', 'width_cm', 'height_cm', 'weight_kg', 'quantity', 'color',
+  'max_stack_layers', 'max_load_on_top_kg', 'this_side_up', 'priority',
+  'allow_yaw', 'allow_pitch', 'allow_roll', 'support_ratio_pct', 'group_same_sku',
+];
 
 function downloadCsvTemplate() {
   const rows = [
     CSV_COLUMNS.join(','),
-    'Cargo A,100,80,60,10,20,#3498db,99,500,1,normal',
-    'Cargo B,120,100,90,25,8,#e74c3c,3,200,1,urgent',
-    'Fragile C,60,40,40,5,30,#2ecc71,1,0,1,lifo',
+    'Cargo A,100,80,60,10,20,#3498db,99,500,1,normal,1,0,0,80,0',
+    'Cargo B,120,100,90,25,8,#e74c3c,3,200,0,urgent,1,1,1,80,1',
+    'Fragile C,60,40,40,5,30,#2ecc71,1,0,1,lifo,1,0,0,100,0',
   ];
   const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -377,27 +381,51 @@ function downloadCsvTemplate() {
   URL.revokeObjectURL(url);
 }
 
-function parseCsvLine(line) {
-  const cells = [];
+/**
+ * RFC 4180-style parser: quoted cells may contain commas, doubled quotes and
+ * line breaks. Returns non-empty records with the line each one starts on.
+ * @returns {Array<{line:number, cells:string[]}>}
+ */
+function parseCsv(text) {
+  const records = [];
+  let cells = [];
   let cur = '';
   let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
+  let line = 1;
+  let startLine = 1;
+  const endRecord = () => {
+    cells.push(cur.trim());
+    if (cells.some((c) => c !== '')) records.push({ line: startLine, cells });
+    cells = [];
+    cur = '';
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '\n') line++;
     if (inQuotes) {
-      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      if (ch === '"' && text[i + 1] === '"') { cur += '"'; i++; }
       else if (ch === '"') inQuotes = false;
       else cur += ch;
     } else if (ch === '"') {
       inQuotes = true;
     } else if (ch === ',') {
-      cells.push(cur);
+      cells.push(cur.trim());
       cur = '';
-    } else {
+    } else if (ch === '\n') {
+      endRecord();
+      startLine = line;
+    } else if (ch !== '\r') {
       cur += ch;
     }
   }
-  cells.push(cur);
-  return cells.map((c) => c.trim());
+  endRecord();
+  return records;
+}
+
+function csvBool(value, fallback) {
+  const v = String(value ?? '').trim().toLowerCase();
+  if (v === '') return fallback;
+  return !(v === '0' || v === 'false' || v === 'no' || v === 'n');
 }
 
 /**
@@ -407,18 +435,17 @@ function parseCsvLine(line) {
  * @returns {{ rows: Array<{line:number, cargo:Object|null, error:string|null}> }}
  */
 function parseCargoCSV(text) {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 2) throw new Error(t('csvNoValidRows'));
-  const header = parseCsvLine(lines[0]).map((h) => h.toLowerCase().replace(/[\s-]+/g, '_'));
+  const records = parseCsv(text.replace(/^\uFEFF/, ''));
+  if (records.length < 2) throw new Error(t('csvNoValidRows'));
+  const header = records[0].cells.map((h) => h.toLowerCase().replace(/[\s-]+/g, '_'));
   const col = (row, name) => {
     const i = header.indexOf(name);
     return i >= 0 ? row[i] : undefined;
   };
   const palette = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'];
   const rows = [];
-  for (let li = 1; li < lines.length; li++) {
-    const row = parseCsvLine(lines[li]);
-    const line = li + 1;
+  for (let ri = 1; ri < records.length; ri++) {
+    const { line, cells: row } = records[ri];
     const length = parseFloat(col(row, 'length_cm') ?? col(row, 'length'));
     const width = parseFloat(col(row, 'width_cm') ?? col(row, 'width'));
     const height = parseFloat(col(row, 'height_cm') ?? col(row, 'height'));
@@ -431,27 +458,27 @@ function parseCargoCSV(text) {
       rows.push({ line, cargo: null, error: t('errQty'), name: col(row, 'name') || '' });
       continue;
     }
-    const tsu = (col(row, 'this_side_up') ?? '1').toLowerCase();
+    const priority = (col(row, 'priority') ?? '').toLowerCase();
     rows.push({
       line,
       error: null,
       cargo: {
-        name: col(row, 'name') || `Cargo ${line}`,
+        name: col(row, 'name') || `${t('defaultCargoName')} ${line}`,
         length, width, height,
-        weightKg: parseFloat(col(row, 'weight_kg') ?? col(row, 'weight')) || 0,
+        weightKg: Math.max(0, parseFloat(col(row, 'weight_kg') ?? col(row, 'weight')) || 0),
         quantity,
-        color: sanitizeColor(col(row, 'color'), palette[(li - 1) % palette.length]),
-        rotatable: { yaw: true, pitch: false, roll: false },
-        thisSideUp: !(tsu === '0' || tsu === 'false' || tsu === 'no'),
-        maxStackLayers: parseInt(col(row, 'max_stack_layers')) || 99,
-        maxLoadOnTopKg: (() => {
-          const v = parseFloat(col(row, 'max_load_on_top_kg'));
-          return isFinite(v) ? v : Infinity;
-        })(),
-        supportRatioMin: 0.8,
-        groupSameSku: false,
-        priority: ['normal', 'urgent', 'lifo'].includes((col(row, 'priority') ?? '').toLowerCase())
-          ? col(row, 'priority').toLowerCase() : 'normal',
+        color: sanitizeColor(col(row, 'color'), palette[(ri - 1) % palette.length]),
+        rotatable: {
+          yaw: csvBool(col(row, 'allow_yaw'), true),
+          pitch: csvBool(col(row, 'allow_pitch'), false),
+          roll: csvBool(col(row, 'allow_roll'), false),
+        },
+        thisSideUp: csvBool(col(row, 'this_side_up'), true),
+        maxStackLayers: Math.max(1, parseInt(col(row, 'max_stack_layers')) || 99),
+        maxLoadOnTopKg: Math.max(0, numOr(col(row, 'max_load_on_top_kg'), Infinity)),
+        supportRatioMin: Math.min(1, Math.max(0, numOr(col(row, 'support_ratio_pct'), 80) / 100)),
+        groupSameSku: csvBool(col(row, 'group_same_sku'), false),
+        priority: ['normal', 'urgent', 'lifo'].includes(priority) ? priority : 'normal',
         visible: true,
       },
     });
@@ -561,7 +588,7 @@ function bindActions() {
   });
   document.getElementById('importFile').addEventListener('change', importJSON);
   document.getElementById('opacitySlider').addEventListener('input', (e) => {
-    emit('changed', { opacity: e.target.value / 100 });
+    emit('opacity', e.target.value / 100);
   });
   document.getElementById('labelsToggle').addEventListener('change', (e) => {
     emit('labelsToggle', e.target.checked);
@@ -722,8 +749,6 @@ function renderCargoList() {
   });
 }
 
-const REASON_KEYS = { oversize: 'reasonOversize', overweight: 'reasonOverweight', nospace: 'reasonNospace' };
-
 export function renderStats(result, containerSpec, meta = {}) {
   const el = document.getElementById('stats');
   const containers = result.containers ?? [];
@@ -805,6 +830,29 @@ function normalizeCargo(c) {
   };
 }
 
+/**
+ * Cargo ids come from untrusted JSON/localStorage and end up in HTML
+ * attributes and as lookup keys: replace any that are malformed or duplicated,
+ * then move nextCargoId past every id in use so new cargo can't collide.
+ */
+function reindexCargoIds() {
+  const seen = new Set();
+  let next = 1;
+  for (const c of state.cargoTypes) {
+    const m = /^C(\d+)$/.exec(typeof c.id === 'string' ? c.id : '');
+    if (m && !seen.has(c.id)) {
+      seen.add(c.id);
+      next = Math.max(next, parseInt(m[1]) + 1);
+    } else {
+      c.id = null;
+    }
+  }
+  for (const c of state.cargoTypes) {
+    if (c.id === null) c.id = `C${next++}`;
+  }
+  state.nextCargoId = next;
+}
+
 function loadFromStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -814,9 +862,8 @@ function loadFromStorage() {
     if (Array.isArray(data.cargoTypes)) {
       state.cargoTypes = data.cargoTypes.map(normalizeCargo).filter(Boolean);
     }
-    if (data.nextCargoId) state.nextCargoId = data.nextCargoId;
     if (typeof data.planTitle === 'string') state.planTitle = data.planTitle;
-    rebuildContainerSelect();
+    reindexCargoIds();
   } catch (e) {
     console.warn('localStorage load failed', e);
   }
@@ -827,7 +874,7 @@ function exportJSON() {
   const data = {
     metadata: {
       createdAt: new Date().toISOString(),
-      version: '3.0',
+      version: PLAN_FORMAT_VERSION,
       title: state.planTitle || t('planTitlePlaceholder'),
     },
     containerId: state.containerId,
@@ -838,7 +885,7 @@ function exportJSON() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `loading-plan-${Date.now()}.json`;
+  a.download = `loading-plan-${tsForFilename()}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -847,21 +894,19 @@ function exportJSON() {
 export function applyImportedData(data) {
   if (Array.isArray(data.customContainers)) {
     for (const cc of data.customContainers) {
-      if (cc?.internal && !getContainer(cc.id)) {
-        addCustomContainer({
-          id: cc.id,
-          label: cc.label,
-          length: cc.internal.length,
-          width: cc.internal.width,
-          height: cc.internal.height,
-          payloadKg: cc.payloadKg,
-        });
-      }
+      const length = parseFloat(cc?.internal?.length);
+      const width = parseFloat(cc?.internal?.width);
+      const height = parseFloat(cc?.internal?.height);
+      const payloadKg = parseFloat(cc?.payloadKg);
+      if (![length, width, height, payloadKg].every((v) => isFinite(v) && v > 0)) continue;
+      const id = typeof cc.id === 'string' ? cc.id : undefined;
+      if (id && getContainer(id)) continue;
+      addCustomContainer({ id, label: String(cc.label ?? 'Custom'), length, width, height, payloadKg });
     }
   }
-  if (data.containerId) state.containerId = data.containerId;
+  if (typeof data.containerId === 'string') state.containerId = data.containerId;
   if (Array.isArray(data.cargoTypes)) state.cargoTypes = data.cargoTypes.map(normalizeCargo).filter(Boolean);
-  if (data.nextCargoId) state.nextCargoId = data.nextCargoId;
+  reindexCargoIds();
   if (typeof data.metadata?.title === 'string') state.planTitle = data.metadata.title;
   setEditMode(null);
   renderAll();
@@ -878,6 +923,10 @@ export async function importJSONText(text) {
     toast(t('jsonError') + err.message, 'error');
     return;
   }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    toast(t('jsonError') + t('jsonNotAPlan'), 'error');
+    return;
+  }
   if (!(await confirmDialog(t('confirmOverwrite'), { okLabel: t('ok'), cancelLabel: t('cancel') }))) return;
   applyImportedData(data);
   toast(t('importedOk'), 'success');
@@ -890,8 +939,4 @@ function importJSON(e) {
   reader.onload = (evt) => { importJSONText(evt.target.result); };
   reader.readAsText(file);
   e.target.value = '';
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }

@@ -15,15 +15,12 @@ import { enrichResult } from './analytics.js';
 import { exportTXT, exportCSV, exportPDF } from './exporters.js';
 import { initLang, toggleLang, t } from './i18n.js';
 import { toast, confirmDialog } from './toast.js';
+import { escapeHtml, tsForFilename } from './util.js';
 
 let lastResult = null;
 let lastContainerSpec = null;
 let lastMeta = {};
 let playTimer = null;
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
 
 function start() {
   initLang();
@@ -52,10 +49,12 @@ function start() {
     console.log(`Pack took ${(t1 - t0).toFixed(1)}ms`);
 
     meta.title = state.planTitle;
+    meta.cargoTypes = state.cargoTypes; // snapshot the plan was packed from
     lastResult = result;
     lastContainerSpec = container;
     lastMeta = meta;
     renderResult(result, container);
+    ui.showDetails(null); // the selected box no longer exists
     // Sync per-cargo visibility (eye toggles) with the fresh scene
     for (const c of state.cargoTypes) {
       setCargoVisibility(c.id, c.visible !== false);
@@ -65,18 +64,30 @@ function start() {
     return result;
   }
 
+  // Nothing to pack: drop the previous plan and show the empty container.
+  function resetPlan() {
+    lastResult = null;
+    lastContainerSpec = null;
+    lastMeta = {};
+    const spec = getContainer(ui.getState().containerId) ?? getContainer('OCEAN_40HQ');
+    renderResult({ containers: [] }, spec);
+    ui.showDetails(null);
+    document.getElementById('stats').textContent = t('notPackedYet');
+    resetSequenceBar();
+  }
+
+  // Keep the 3D view, stats and exports in step with the plan.
+  function refreshPlan() {
+    if (!runPack()) resetPlan();
+  }
+
   ui.on('pack', () => {
     if (!runPack()) toast(t('addAtLeastOne'), 'error');
   });
 
-  ui.on('containerChanged', () => {
-    const state = ui.getState();
-    if (state.cargoTypes.length > 0) runPack();
-  });
-
-  ui.on('changed', (payload) => {
-    if (payload?.opacity !== undefined) setOpacity(payload.opacity);
-  });
+  // Any edit to the cargo list or container re-packs automatically.
+  ui.on('changed', refreshPlan);
+  ui.on('opacity', (value) => setOpacity(value));
 
   ui.on('labelsToggle', (visible) => setLabelsVisible(visible));
   ui.on('cogToggle', (visible) => setCOGVisible(visible));
@@ -105,8 +116,7 @@ function start() {
 
   document.getElementById('demoBtn')?.addEventListener('click', async () => {
     if (!(await confirmDialog(t('confirmDemo'), { okLabel: t('ok'), cancelLabel: t('cancel') }))) return;
-    ui.applyImportedData(getDemoData());
-    runPack();
+    ui.applyImportedData(getDemoData()); // emits 'changed' → re-pack
     toast(t('demoLoaded'), 'success');
   });
 
@@ -187,22 +197,23 @@ function start() {
 
   // ===== Exports =====
   function ensureResult() {
-    if (!lastResult) runPack();
+    if (!lastResult && !runPack()) toast(t('addAtLeastOne'), 'error');
     return lastResult;
   }
+  // The plan title can be edited after packing — always export the current one.
+  const exportMeta = () => ({ ...lastMeta, title: ui.getState().planTitle });
 
   document.getElementById('exportTxtBtn')?.addEventListener('click', () => {
-    if (ensureResult()) exportTXT(lastResult, lastContainerSpec, lastMeta);
+    if (ensureResult()) exportTXT(lastResult, lastContainerSpec, exportMeta());
   });
   document.getElementById('exportCsvBtn')?.addEventListener('click', () => {
-    if (ensureResult()) exportCSV(lastResult, lastContainerSpec, lastMeta);
+    if (ensureResult()) exportCSV(lastResult, lastContainerSpec);
   });
   document.getElementById('exportPdfBtn')?.addEventListener('click', () => {
     if (ensureResult()) {
       exportPDF(lastResult, lastContainerSpec, {
-        ...lastMeta,
+        ...exportMeta(),
         snapshotDataUrl: captureImage(),
-        cargoTypes: ui.getState().cargoTypes,
       });
     }
   });
@@ -210,7 +221,7 @@ function start() {
     if (!ensureResult()) return;
     const a = document.createElement('a');
     a.href = captureImage();
-    a.download = `loading-plan-${Date.now()}.png`;
+    a.download = `loading-plan-${tsForFilename()}.png`;
     a.click();
   });
 
@@ -235,6 +246,8 @@ function start() {
     if (lastResult) ui.renderStats(lastResult, lastContainerSpec, lastMeta);
     if (seqBar?.style.display !== 'none') updateSeqLabel();
   });
+
+  refreshPlan(); // show the saved plan (or the empty container) on load
 }
 
 if (document.readyState === 'loading') {
